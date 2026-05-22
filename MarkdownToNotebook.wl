@@ -440,8 +440,21 @@ usageSlot[opts_, sections_] := Block[{pairs},
     {Cell[CellGroupData[Catenate[usagePair /@ pairs], Open]]}
 ]
 
-notesSlot[opts_, sections_] := Block[{prose = rawSectionText[sections, "details & options"]},
-    If[prose === "", slotDefault[opts], {Cell[TextData @ inlineTextData[prose], "Notes"]}]
+(* the Details & Options notes: one "Notes" cell per item, so each renders as its
+   own bullet (the reference-page convention) - a paragraph is one note, a markdown
+   list is one note per item, a table becomes a grid. *)
+detailsCells[sections_] := Catenate @ Map[
+    block |-> Switch[block["Type"],
+        "Prose", {Cell[TextData @ inlineTextData[block["Text"]], "Notes"]},
+        "List", Map[Cell[TextData @ inlineTextData[#], "Notes"] &, block["Items"]],
+        "Table", {tableCell[block]},
+        _, {}
+    ],
+    Lookup[sections, "details & options", {}]
+]
+
+notesSlot[opts_, sections_] := With[{cells = detailsCells[sections]},
+    If[cells === {}, slotDefault[opts], cells]
 ]
 
 (* the landing-page hero image: a "## Hero Image" section's first executable cell
@@ -904,13 +917,13 @@ symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"]
     nb = docTemplate["FunctionBaseTemplateExt.nb"];
     name = Lookup[meta, "Name", ""];
     usage = rawSectionText[sections, "usage"];
-    notes = rawSectionText[sections, "details & options"];
+    notes = detailsCells[sections];
     nb = fillDocString[nb, "ObjectName", name];
     If[ usage =!= "",
         nb = nb /. Cell[_, "Usage", ___] :> usageCell[usage]
     ];
-    If[ notes =!= "",
-        nb = nb /. Cell[_, "Notes", o___] :> Cell[TextData @ inlineTextData[notes], "Notes", o]
+    If[ notes =!= {},
+        nb = nb /. Cell[_, "Notes", ___] :> Sequence @@ notes
     ];
     (* load the documented paclet so a reader can run the examples *)
     If[ KeyExistsQ[meta, "Context"],

@@ -54,6 +54,11 @@ mapping.
   links, and the palette's formatting buttons.
 - [palette.md](palette.md) - every Documentation Tools palette and docked-cell
   button, with its markdown equivalent and status.
+- [resource-guidelines.md](resource-guidelines.md) - a refined working copy of the
+  official Function/Paclet Repository style guidelines, with how each maps to
+  markdown. Re-fetch the linked sources when in doubt.
+- [subtleties.md](subtleties.md) - hard-won gotchas encountered building the
+  converter and the example paclet.
 
 The screenshots in these pages (`images/*.png`) are regenerated from source by
 [update-screenshots.wls](update-screenshots.wls): it converts the

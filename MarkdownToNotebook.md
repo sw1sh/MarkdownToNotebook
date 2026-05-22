@@ -31,24 +31,15 @@ contents of that local file or URL, resolved relative to this document.
 
 ## Details & Options
 
-The *source* can be a local file path, an `http(s)` URL, or a raw markdown string. The layout is the document's own `Template` frontmatter key (`FunctionResource`, `Symbol`, `Guide`, `TechNote`, `Paclet`, or `Default`), so the source declares its own layout.
-
-A single template registry drives the layout. `FunctionResource` fills the slots of the official `FunctionResourceDefinition.nb` template (preserving its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates (`ObjectName`/`Usage`/`Examples`, `GuideTitle`/`GuideAbstract` and so on); and `Default` maps headings and code directly to standard notebook styles. The frontmatter keys mirror each template's metadata, so the author never writes cell styles.
-
-The optional second argument selects the result: omitted (or `"Notebook"`) returns the `Notebook` expression, `"Association"` returns the parsed structure for inspection, and a file name writes the notebook to that file. There are no options.
-
-Evaluated example outputs are cached automatically with the built-in persistence framework, as a `PersistentSymbol` per cell (under the `"MarkdownToNotebook/ExampleOutput/"` name at the `"Local"` `PersistenceLocation`), keyed by a cumulative hash of the cells, so re-runs reuse them across sessions. Manage the cache the standard way: `PersistentObjects["MarkdownToNotebook/ExampleOutput/*", "Local"]` lists it, `DeleteObject` clears it, and `$PersistencePath` / `PersistenceLocation` relocate it.
-
-This document and its `.wl` implementation live on GitHub, which renders the
-markdown directly: [github.com/sw1sh/MarkdownToNotebook](https://github.com/sw1sh/MarkdownToNotebook).
-
-To regenerate the definition notebook: get `MarkdownToNotebook.md` and
-`MarkdownToNotebook.wl` from the repository, evaluate `Get["MarkdownToNotebook.wl"]`
-to define the function, then `MarkdownToNotebook["MarkdownToNotebook.md", "MarkdownToNotebook.nb"]`.
-The `#| file:` include in the Definition section pulls the code back in from the
-`.wl`, the example cells are evaluated and cached, and the `FunctionResource`
-template is filled, writing `MarkdownToNotebook.nb`. The whole loop (define from
-markdown, convert, publish) is what `build.wls` runs.
+- The *source* is a local file path, an `http(s)` URL, or a raw markdown string.
+- The layout is the document's own `Template` frontmatter key — `FunctionResource`, `Symbol`, `Guide`, `TechNote`, `Paclet`, or `Default` — so the source declares its own layout.
+- `FunctionResource` fills the official `FunctionResourceDefinition.nb` template (keeping its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates; `Default` maps headings and code to standard notebook styles.
+- The frontmatter keys mirror each template's metadata, so the author never writes cell styles.
+- The optional second argument selects the result: omitted (or `"Notebook"`) returns the `Notebook`, `"Association"` returns the parsed structure, and a file name writes the notebook to that file. There are no options.
+- Evaluated example outputs are cached as a `PersistentSymbol` per cell at the `"Local"` `PersistenceLocation`, keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
+- Manage that cache the standard way: `PersistentObjects["MarkdownToNotebook/ExampleOutput/*", "Local"]` lists it, `DeleteObject` clears it, and `$PersistencePath` / `PersistenceLocation` relocate it.
+- The source lives on GitHub, which renders the markdown directly: [github.com/sw1sh/MarkdownToNotebook](https://github.com/sw1sh/MarkdownToNotebook).
+- Running the function on this document — `Get` the `.wl`, then `MarkdownToNotebook["MarkdownToNotebook.md", "MarkdownToNotebook.nb"]` — reproduces this very definition notebook; that is the loop `build.wls` runs.
 
 ## Usage
 
