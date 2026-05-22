@@ -8,7 +8,7 @@ mind when extending the converter or authoring docs. (Intended to seed a skill.)
 
 ### `*` is a wildcard inside string patterns
 A bare `"*"` in a `StringExpression` is the *wildcard metacharacter* (any run of
-characters), not a literal asterisk. `StringMatchQ["`abc def", ("-"|"*"|"+") ~~ " " ~~ ___]`
+characters), not a literal asterisk. `StringMatchQ["abc def", ("-"|"*"|"+") ~~ " " ~~ ___]`
 returns `True` because the `"*"` alternative matches `` `abc `` and then the space.
 This silently mis-classified a Usage line as a markdown list item, so the Usage
 slot was never filled. Fixes:

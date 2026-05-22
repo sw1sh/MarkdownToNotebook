@@ -293,9 +293,15 @@ sectionText[sections_, key_] := StringRiffle[
 
 cumulativeHashes[cells_List] := Map[Hash, Rest @ FoldList[#1 <> mdSep <> #2["Code"] &, "", cells]]
 
+(* the light/dark mode example renderings are pinned to. Default light (the
+   deployed notebook is light); the markdown-out twin sets it to "Dark". Guard the
+   initialization with ValueQ so re-loading this file (the Definition cell inlines
+   and evaluates the whole .wl during conversion) does not clobber an override. *)
+If[! ValueQ[$lightDark], $lightDark = "Light"]
+
 (* the notebook a result stands for (a Notebook expression, or the open notebook of
-   a NotebookObject), pinned to light mode. *)
-resultNotebook[res_] := Append[If[Head[res] === NotebookObject, NotebookGet[res], res], LightDark -> "Light"]
+   a NotebookObject), pinned to the current mode. *)
+resultNotebook[res_] := Append[If[Head[res] === NotebookObject, NotebookGet[res], res], LightDark -> $lightDark]
 
 (* output for an evaluated cell. A whole notebook has no faithful inline form -
    inlining its cells breaks the surrounding layout (a Title/Section renders
@@ -1253,7 +1259,10 @@ markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n
         ] <> "```";
         If[ executableQ[b] && ! MissingQ[b["OutputBoxes"]] && b["OutputBoxes"] =!= Null,
             n += 1; imgFile = base <> "-" <> ToString[n] <> ".png";
-            Quiet @ Export[FileNameJoin[{imgDir, imgFile}], UsingFrontEnd @ Rasterize[RawBoxes[b["OutputBoxes"]], ImageResolution -> 96]];
+            Quiet @ Export[FileNameJoin[{imgDir, imgFile}],
+                UsingFrontEnd @ Rasterize[
+                    Notebook[{Cell[BoxData[b["OutputBoxes"]], "Output"]}, LightDark -> $lightDark, StyleDefinitions -> "Default.nb"],
+                    ImageResolution -> 96]];
             fence <> "\n\n![output](images/" <> imgFile <> ")",
             fence
         ]
