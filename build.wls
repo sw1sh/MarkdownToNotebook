@@ -79,8 +79,15 @@ print["build: deploying the resource function publicly to the cloud"]
 Needs["DefinitionNotebookClient`"]
 If[ Not[TrueQ[$CloudConnected]], Quiet @ CloudConnect[] ]
 If[ TrueQ[$CloudConnected],
-    deployed = UsingFrontEnd @ DefinitionNotebookClient`DeployResource["Function", File[outNb], "CloudPublic"];
-    print["  deployed: ", Replace[deployed, ro_ResourceObject :> ro["DocumentationLink"]] ]
+    deployed = UsingFrontEnd @ Block[{nbo = NotebookOpen[File[outNb]], res},
+        res = DefinitionNotebookClient`DeployResource["Function", nbo, "CloudPublic"];
+        NotebookClose[nbo];
+        res
+    ];
+    print["  deployed: ", Replace[deployed, {
+        ro_ResourceObject :> ro["DocumentationLink"],
+        a_Association :> Lookup[a, "ResultLink", a]
+    }] ]
     ,
     print["  skipped:  not cloud-connected (run CloudConnect[] first)"]
 ]

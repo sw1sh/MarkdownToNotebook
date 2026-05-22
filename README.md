@@ -18,6 +18,17 @@ Frontmatter drives metadata; `## sections` and fenced ` ```wl ` cells become the
 content; example cells are evaluated and cached. A `#| file: path` cell inlines a
 `.wl` file or URL.
 
+The function is deployed publicly in the Wolfram Cloud, so you can use it without
+installing anything:
+
+```wl
+ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"]["doc.md"]
+```
+
+> **Note:** official publication to the [Wolfram Function Repository](https://resources.wolframcloud.com/FunctionRepository/)
+> is pending review. Until then, use the public cloud link above (or the local
+> `MarkdownToNotebook.wl`).
+
 ## Layout
 
 - [`MarkdownToNotebook.wl`](MarkdownToNotebook.wl) — the converter.
