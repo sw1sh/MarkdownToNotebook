@@ -140,7 +140,7 @@ toolbar button clears by scanning the directory to populate the manifest /
 
 ## Self-hosting
 
-`MarkdownToResourceFunction[file]` is the `FunctionResource` specialization.
-A document whose `## Definition` inlines its own `.wl` and whose frontmatter is
-the resource metadata reproduces its own definition notebook - see
-`bootstrap.wls` (the converter publishing itself).
+A document whose frontmatter is `Template: FunctionResource`, whose `## Definition`
+inlines its own `.wl`, and whose frontmatter is the resource metadata reproduces
+its own definition notebook via `MarkdownToNotebook[file]` - see `build.wls` (the
+converter publishing itself).

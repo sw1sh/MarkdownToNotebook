@@ -34,7 +34,7 @@ saveImage[img_, name_] := (
 
 (* convert a markdown doc to its authoring notebook expression *)
 authoringNotebook[mdFile_String] :=
-    MarkdownToNotebook[mdFile, "Output" -> "Notebook", "CacheDirectory" -> cacheDir]
+    MarkdownToNotebook[mdFile, "Notebook", "CacheDirectory" -> cacheDir]
 
 (* a built reference/guide page: convert, then run DocumentationBuild (the
    Preview button) and rasterize the resulting page at a fixed width *)

@@ -291,11 +291,14 @@ chooses to display one by opening it. Rendering needs a front end, so wrap the
 example-evaluation pass in `UsingFrontEnd`, and set the session to light
 (`CurrentValue[$FrontEnd, LightDark] = "Light"`) so the thumbnail is not dark.
 
-### Layout comes from frontmatter, not an option
-There is no `"Template"` option - the document's `Template` frontmatter key is the
-single source of truth for layout. A specialization that forces a layout
-(`MarkdownToResourceFunction` → `FunctionResource`) does it by binding a private
-`$templateOverride` in a `Block`, not by exposing a redundant option.
+### Layout comes from frontmatter; the result form is a positional argument
+There is no `"Template"` option and no second function - the document's `Template`
+frontmatter key is the single source of truth for layout, and `MarkdownToNotebook`
+is the only entry point. Likewise there is no `"Output"` option: the result is
+chosen by the optional second argument - omitted/`"Notebook"` returns the
+`Notebook`, `"Association"` returns the parsed structure, and any other string is a
+file path to write. Keeping the cases positional documents them as distinct usage
+lines instead of hiding them in an option value.
 
 ### Drop the template's blank standalone usage placeholder
 The Function template seeds an empty `UsageInputs` cell beside the `Usage` slot

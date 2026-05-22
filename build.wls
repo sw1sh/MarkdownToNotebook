@@ -59,7 +59,7 @@ print["build: converting itself (cold run)"]
 cacheFile = src <> ".cache.wxf"
 If[ FileExistsQ[cacheFile], DeleteFile[cacheFile] ]
 
-{coldTime, result} = AbsoluteTiming @ MarkdownToResourceFunction[src, "Output" -> "Association"]
+{coldTime, result} = AbsoluteTiming @ MarkdownToNotebook[src, "Association"]
 nb = result["Notebook"]
 
 print["  Template:    ", result["Template"]]
@@ -71,12 +71,12 @@ print["  Unfilled slots: ", Count[nb, _TemplateSlot, Infinity]]
 print["  cold run:    ", coldTime, " s"]
 
 (* phase 3: re-run to demonstrate the example cache (no re-evaluation) *)
-{warmTime, warmResult} = AbsoluteTiming @ MarkdownToResourceFunction[src, "Output" -> "Association"]
+{warmTime, warmResult} = AbsoluteTiming @ MarkdownToNotebook[src, "Association"]
 print["  warm run:    ", warmTime, " s (cache ", If[FileExistsQ[cacheFile], "hit", "miss"], ")"]
 
 (* phase 4: write the definition notebook to disk (a file target makes the
    function write rather than just return the Notebook) *)
-outNb = MarkdownToResourceFunction[src, FileNameJoin[{dir, "MarkdownToNotebook.nb"}]]
+outNb = MarkdownToNotebook[src, FileNameJoin[{dir, "MarkdownToNotebook.nb"}]]
 print["  wrote:       ", FileNameTake[outNb], " (", Head @ Quiet @ Get[outNb], ")"]
 
 (* phase 5: deploy the resource function publicly to the cloud (the docked

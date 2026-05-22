@@ -1132,21 +1132,20 @@ buildNotebook[_, data_] := defaultNotebook[data]
 
 (* === entry point === *)
 
-Options[MarkdownToNotebook] = {"Cache" -> True, "Output" -> Automatic, "CacheDirectory" -> Automatic}
+Options[MarkdownToNotebook] = {"Cache" -> True, "CacheDirectory" -> Automatic}
 
-(* the layout comes from the document's own Template frontmatter key - there is no
-   Template option, since the source declares its own layout. MarkdownToResourceFunction
-   forces FunctionResource for any source by binding this internally. *)
-$templateOverride = None
+(* the result is chosen by the optional second argument:
+     MarkdownToNotebook[source]                -> the Notebook expression
+     MarkdownToNotebook[source, "Notebook"]    -> the Notebook expression
+     MarkdownToNotebook[source, "Association"] -> the parsed structure
+     MarkdownToNotebook[source, file]          -> write the notebook to file, return it
+   ("Notebook"/"Association" are reserved; any other string is a file path.) The
+   layout always comes from the document's own Template frontmatter key. *)
+MarkdownToNotebook[file_String, opts : OptionsPattern[]] := MarkdownToNotebook[file, Automatic, opts]
 
-(* one argument: return the Notebook expression. two arguments: also write it to
-   the file target and return that file. The "Output" option overrides: "Notebook"
-   or "Association" always return (ignoring target); "File" always writes. *)
-MarkdownToNotebook[file_String, opts : OptionsPattern[]] := MarkdownToNotebook[file, None, opts]
-
-MarkdownToNotebook[file_String, outNbArg : (_String | None), opts : OptionsPattern[]] := Block[{
+MarkdownToNotebook[file_String, spec : (_String | Automatic), opts : OptionsPattern[]] := Block[{
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
-    orderedCode, hashes, cacheFile, cached, allHit, outputs, data, filled, outNb
+    orderedCode, hashes, cacheFile, cached, allHit, outputs, data, filled
 },
     src = resolveSource[file];
     text = src["Text"];
@@ -1156,7 +1155,7 @@ MarkdownToNotebook[file_String, outNbArg : (_String | None), opts : OptionsPatte
     $docPaclet = Lookup[meta, "Paclet", ""];
     $docContext = Lookup[meta, "Context", ""];
     blocks = resolveIncludes[parsed["Blocks"], src["Base"]];
-    tmplName = If[StringQ[$templateOverride], $templateOverride, Lookup[meta, "Template", "Default"]];
+    tmplName = Lookup[meta, "Template", "Default"];
 
     (* evaluate every executable cell in document order, threading state in a
        private context (so the document's own code can't clobber the live
@@ -1189,19 +1188,10 @@ MarkdownToNotebook[file_String, outNbArg : (_String | None), opts : OptionsPatte
     data = <|"meta" -> meta, "blocks" -> blocks, "sections" -> sections, "defCode" -> defCode|>;
     filled = buildNotebook[tmplName, data];
 
-    outNb = Replace[outNbArg, None :> FileNameJoin[{If[src["Local"], DirectoryName[file], Directory[]], src["Name"] <> ".nb"}]];
-    Switch[OptionValue["Output"],
-        "Notebook", filled,
-        "Association", <|"Notebook" -> filled, "Metadata" -> meta, "Sections" -> Keys[sections], "Template" -> tmplName|>,
-        "File", Export[outNb, filled, "NB"],
-        _, If[outNbArg === None, filled, Export[outNb, filled, "NB"]]
+    Which[
+        spec === Automatic || spec === "Notebook", filled,
+        spec === "Association",
+            <|"Notebook" -> filled, "Metadata" -> meta, "Sections" -> Keys[sections], "Template" -> tmplName|>,
+        True, Export[spec, filled, "NB"]
     ]
-]
-
-(* the FunctionResource specialization: build a definition notebook from any
-   source, regardless of its frontmatter Template, by forcing the layout. *)
-Options[MarkdownToResourceFunction] = Options[MarkdownToNotebook]
-
-MarkdownToResourceFunction[file_String, rest___] := Block[{$templateOverride = "FunctionResource"},
-    MarkdownToNotebook[file, rest]
 ]

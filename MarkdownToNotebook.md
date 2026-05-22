@@ -31,19 +31,16 @@ contents of that local file or URL, resolved relative to this document.
 
 ## Details & Options
 
-The *source* can be a local file path, an `http(s)` URL, or a raw markdown string. The layout is the document's own `Template` frontmatter key (`FunctionResource`, `Symbol`, `Guide`, `TechNote`, `Paclet`, or `Default`), so the source declares its own layout. `MarkdownToResourceFunction[source]` builds a Function Repository definition notebook from any source, forcing the `FunctionResource` layout regardless of the frontmatter.
+The *source* can be a local file path, an `http(s)` URL, or a raw markdown string. The layout is the document's own `Template` frontmatter key (`FunctionResource`, `Symbol`, `Guide`, `TechNote`, `Paclet`, or `Default`), so the source declares its own layout.
 
 A single template registry drives the layout. `FunctionResource` fills the slots of the official `FunctionResourceDefinition.nb` template (preserving its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates (`ObjectName`/`Usage`/`Examples`, `GuideTitle`/`GuideAbstract` and so on); and `Default` maps headings and code directly to standard notebook styles. The frontmatter keys mirror each template's metadata, so the author never writes cell styles.
 
-The following options can be given:
+The optional second argument selects the result: omitted (or `"Notebook"`) returns the `Notebook` expression, `"Association"` returns the parsed structure for inspection, and a file name writes the notebook to that file. The following options can also be given:
 
 | option | default | description |
 |---|---|---|
-| `"Output"` | `Automatic` | what to return: `"Notebook"`, `"Association"` (the parsed structure), or `"File"` |
 | `"Cache"` | `True` | reuse cached example outputs instead of re-evaluating |
 | `"CacheDirectory"` | `Automatic` | where the example-output cache is written |
-
-With `Automatic` output, `MarkdownToNotebook[source]` returns a `Notebook` and `MarkdownToNotebook[source, target]` writes the file *target*.
 
 This document and its `.wl` implementation live on GitHub, which renders the
 markdown directly: [github.com/sw1sh/MarkdownToNotebook](https://github.com/sw1sh/MarkdownToNotebook).
@@ -60,7 +57,9 @@ markdown, convert, publish) is what `build.wls` runs.
 
 `MarkdownToNotebook[source]` converts a literate-markdown *source* into a Wolfram notebook and returns the `Notebook` expression.
 
-`MarkdownToNotebook[source, target]` writes the notebook to the file *target* and returns the file.
+`MarkdownToNotebook[source, "Association"]` returns the parsed structure as an `Association` instead of the notebook.
+
+`MarkdownToNotebook[source, file]` writes the notebook to *file* and returns the file.
 
 ## Basic Examples
 
@@ -80,10 +79,16 @@ NotebookPut[MarkdownToNotebook["# Demo\n\nInline `code` and *emphasis* in a para
 
 ## Options
 
-`"Output"` controls the return value. The default `Automatic` returns a `Notebook` (or writes the file when a *target* is given); `"Association"` instead exposes the parsed structure for inspection:
+The parsed structure returned by `"Association"` exposes the frontmatter metadata, the section list, and the chosen template:
 
 ```wl
-MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Output" -> "Association"]["Metadata"]
+MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Association"]["Metadata"]
+```
+
+`"Cache" -> False` re-evaluates every example cell instead of reusing the cache:
+
+```wl
+Head[MarkdownToNotebook["# Title\n\nA paragraph.", "Cache" -> False]]
 ```
 
 ## Applications
@@ -99,13 +104,13 @@ Generate a paclet's entire documentation set, the guide page, the symbol referen
 A string that is neither a URL nor an existing file is treated as raw markdown, so a mistyped path silently parses as content rather than erroring:
 
 ```wl
-MarkdownToNotebook["nonexistent.md", "Output" -> "Association"]["Sections"]
+MarkdownToNotebook["nonexistent.md", "Association"]["Sections"]
 ```
 
 ## Neat Examples
 
-The layout comes from the document's `Template` frontmatter, defaulting to `Default`. `MarkdownToResourceFunction` instead forces the `FunctionResource` layout for any source, regardless of its frontmatter:
+The `Template` frontmatter key alone switches the layout, so the same converter and source style yield a guide, a symbol page, or a plain notebook. Here the key selects the layout reported back:
 
 ```wl
-MarkdownToResourceFunction["# X\n\ntext", "Output" -> "Association"]["Template"]
+MarkdownToNotebook["---\nTemplate: Guide\n---\n# Demo\n\ntext", "Association"]["Template"]
 ```
