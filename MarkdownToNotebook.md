@@ -65,23 +65,23 @@ markdown, convert, publish) is what `build.wls` runs.
 
 ## Basic Examples
 
-Convert a raw markdown string into a notebook and count its cells:
+Convert a markdown string into a notebook. With one argument the result is the `Notebook` itself:
 
 ```wl
-Count[MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text.", "Output" -> "Notebook"], _Cell, Infinity]
+MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text."]
 ```
 
 ## Scope
 
-The source can be a file path, an http(s) URL, or a raw string. Read back the parsed top-level sections:
+A `#` heading becomes a `Title`, `##` a `Section`, and inline `` `code` `` and `*emphasis*` carry their formatting through to the cells:
 
 ```wl
-MarkdownToNotebook["---\nTemplate: Default\n---\n## Alpha\n\nx\n\n## Beta\n\ny", "Output" -> "Association"]["Sections"]
+MarkdownToNotebook["# Demo\n\nInline `code` and *emphasis* in a paragraph.\n\n## Notes\n\nA second section."]
 ```
 
 ## Options
 
-`"Output"` controls the return value: the `Notebook` expression (default), an `Association` for inspection, which exposes the parsed metadata, or a written `"File"`:
+`"Output"` controls the return value. The default `Automatic` returns a `Notebook` (or writes the file when a *target* is given); `"Association"` instead exposes the parsed structure for inspection:
 
 ```wl
 MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Output" -> "Association"]["Metadata"]

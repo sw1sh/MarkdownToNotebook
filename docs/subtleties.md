@@ -115,16 +115,28 @@ the call head a plain `String` that `DocumentationBuild` linkifies at build time
 A hand-rolled splitter (and `GeneralUtilities`Code`PackagePrivate`fmtUsageString`,
 which returns a flat box-string the build does **not** linkify) misses cases.
 
-### Paclet symbols don't auto-link; link them yourself
-`ParseTextTemplate` leaves a call head / symbol as a plain `String`, expecting
-`DocumentationBuild` to linkify it. But the build only links **System** symbols,
-and a resource definition notebook is never built - so paclet symbols never
-resolve to their ref pages. Post-process the boxes: replace any string that is a
-name in the documented paclet's context with
-`ButtonBox[name, BaseStyle->"Link", ButtonData->"paclet:Pub/Name/ref/name"]`, and
-System symbols with `paclet:ref/name`. This also self-links the principal symbol
-in the usage line (the palette's **Link Principal Symbols**, distinct from
-**Just Format**), so no separate principal-symbol pass is needed.
+### Reserve `ParseTextTemplate` for usage signatures, parse prose code literally
+`ParseTextTemplate` is built for **signatures** (`f[arg1, arg2]`): it italicizes
+every identifier-like token - *including tokens inside string literals*. Run it on
+real inline code and `ResourceFunction["…"]["doc.md"]` comes back with the string
+mangled to `"…StyleBox[doc,"TI"]….md"`, and it eagerly links every System symbol
+it knows (`Notebook`, `ResourceFunction`, …), so prose fills with ugly inline
+links. So: use `ParseTextTemplate` only for the `UsageInputs` cells (pure
+signatures, no strings), and parse prose `` `code` `` literally with
+`ReparseBoxStructurePacket` (preserves strings, adds no italics or links).
+
+### Link only the documented paclet's own symbols inside `code`
+`ParseTextTemplate` leaves a paclet (non-System) symbol a plain `String`,
+expecting `DocumentationBuild` to linkify it - but that build never runs on a
+resource notebook. Link those yourself: replace any string that is a name in the
+documented paclet's context with
+`ButtonBox[name, BaseStyle->"Link", ButtonData->"paclet:Pub/Name/ref/name"]`.
+Do **not** auto-link System symbols in inline code - linking every `Notebook` /
+`ResourceFunction` is noise; write explicit `[text](paclet:…)` markdown links
+where a System-symbol link is actually wanted. When templating a usage signature,
+`stripLinks` (drop every `ButtonBox` wrapper, keep its content) first to undo
+`ParseTextTemplate`'s own System links, then re-link cleanly - otherwise a linked
+head gets wrapped a second time into a `ButtonBox[ButtonBox[…]]`.
 
 ## Documentation pages
 
@@ -238,10 +250,28 @@ running kernel's `DefinitionNotebookClient`. If the kernel that builds is older
 than the front end that opens it, `Check` flags the notebook as out of date.
 Build with a current kernel (and `PacletInstall["DefinitionNotebookClient", UpdateSites -> True]`
 as a safeguard); note that a custom `wolframscript` may point at a different
-Wolfram installation (hence an older paclet) than your front end. Deploy a
-finished resource notebook publicly with
-`DefinitionNotebookClient`DeployResource[rtype, File[nb], "CloudPublic"]` (the
-docked Deploy > "Publicly in the cloud" action).
+Wolfram installation (hence an older paclet) than your front end.
+
+### `DeployResource` needs a `NotebookObject`, not `File[…]`
+The docked Deploy > "Publicly in the cloud" action is
+`DefinitionNotebookClient`DeployResource[rtype, notebook, "CloudPublic"]`, but
+`notebook` must be an **open** `NotebookObject` - pass `File[nb]` and the call
+returns unevaluated. Open it first:
+`UsingFrontEnd @ Block[{nbo = NotebookOpen[File[nb]], r}, r = DefinitionNotebookClient`DeployResource["Function", nbo, "CloudPublic"]; NotebookClose[nbo]; r]`.
+
+### Pin the deployed notebook to light mode
+The cloud renders the deployed notebook with the viewer's Light/Dark theme, so a
+dark-mode reader sees a dark definition page. Force light by setting the notebook
+option `LightDark -> "Light"` (a Wolfram 14.2+/15 notebook option) on the built
+`Notebook[…]` before writing/deploying.
+
+### Drop the template's blank standalone usage placeholder
+The Function template seeds an empty `UsageInputs` cell beside the `Usage` slot
+(for a hand-typed second usage line). Once you fill all usage from the markdown it
+renders as a blank line. Drop it - but match it by *content emptiness*
+(`StringJoin[Cases[boxes, _String, Infinity]]` is whitespace), not a literal
+`Cell[BoxData[], …]`: the template's `BoxData` is a context-shadowed symbol, so
+the bare pattern silently misses it.
 
 ### `DefinitionMissing` can be a headless artifact (FunctionResource)
 A definition that inlines a whole multi-symbol package can report
@@ -249,7 +279,7 @@ A definition that inlines a whole multi-symbol package can report
 perfectly valid: reproducing the scraper's own steps - `evaluateCell` in
 `FunctionResource`$ResourceFunctionTempContext` then `minimalDefinition` - yields
 a non-empty `Language`DefinitionList`. The interactive Deploy/Submit path (what
-`bootstrap.wls` uses) builds it cleanly.
+`build.wls` uses) builds it cleanly.
 
 ## Environment
 

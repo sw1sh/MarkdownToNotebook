@@ -411,7 +411,7 @@ usageStatement[text_String] := StringCases[StringTrim[text],
     StartOfString ~~ "`" ~~ c : Shortest[__] ~~ "`" ~~ rest___ :> {c, StringTrim[rest]}, 1]
 
 usagePair[{code_String, desc_String}] := {
-    Cell[BoxData[linkSymbols @ templateBox[code]], "UsageInputs", FontFamily -> "Source Sans Pro"],
+    Cell[BoxData[linkSymbols @ stripLinks @ templateBox[code]], "UsageInputs", FontFamily -> "Source Sans Pro"],
     Cell[TextData @ inlineTextData[desc], "UsageDescription"]
 }
 
@@ -679,18 +679,32 @@ symbolInContextQ[name_String, ctx_String] := ctx =!= "" &&
     StringMatchQ[name, (LetterCharacter | "$") ~~ (WordCharacter | "$") ...] &&
     Quiet[Names[ctx <> name] =!= {}]
 
-(* ParseTextTemplate leaves a call head / symbol as a plain String, expecting
-   DocumentationBuild to linkify it - but the build only links System symbols,
-   and the resource definition notebook is never built, so paclet symbols never
-   resolve. Linkify them ourselves: a name in the documented paclet's context
-   links to its ref page; a System symbol links to its system ref page. *)
-linkSymbols[boxes_] := boxes /. s_String /; (symbolInContextQ[s, $docContext] || symbolInContextQ[s, "System`"]) :>
-    ButtonBox[s, BaseStyle -> "Link",
-        ButtonData -> If[$docPaclet =!= "" && symbolInContextQ[s, $docContext],
-            "paclet:" <> $docPaclet <> "/ref/" <> s,
-            "paclet:ref/" <> s]]
+(* drop every ButtonBox link wrapper, keeping its content. ParseTextTemplate
+   eagerly links any System symbol it recognizes (Notebook, ResourceFunction,
+   ...), which renders as ugly inline links - especially a whole expression like
+   ResourceFunction["..."]. We strip those and re-link only the documented
+   paclet's own symbols below, so inline code reads as code, not a wall of links. *)
+stripLinks[boxes_] := boxes //. ButtonBox[content_, ___] :> content
 
-codeToInline[code_String] := Cell[BoxData[linkSymbols @ templateBox[code]], "InlineFormula"]
+(* ParseTextTemplate leaves a paclet (non-System) symbol as a plain String,
+   expecting DocumentationBuild to linkify it - but that build never runs on a
+   resource notebook, so link the documented paclet's own symbols ourselves. A
+   generic System symbol is deliberately left unlinked (see stripLinks): linking
+   every Notebook/ResourceFunction inside backticks is noise, and explicit links
+   are written as markdown [text](paclet:...) instead. *)
+linkSymbols[boxes_] := If[ $docContext === "",
+    boxes,
+    boxes /. s_String /; symbolInContextQ[s, $docContext] :>
+        ButtonBox[s, BaseStyle -> "Link",
+            ButtonData -> If[$docPaclet =!= "", "paclet:" <> $docPaclet <> "/ref/" <> s, "paclet:ref/" <> s]]
+]
+
+(* prose inline `code`: parse it literally (inputBoxes preserves strings and adds
+   no template italics or System-symbol links), then link only the documented
+   paclet's own symbols. ParseTextTemplate is reserved for Usage signatures
+   (usagePair) where italic argument styling is wanted - on full code it would
+   italicize tokens even inside string literals ("doc.md" -> "...StyleBox[doc]..."). *)
+codeToInline[code_String] := Cell[BoxData[linkSymbols @ inputBoxes[code]], "InlineFormula"]
 
 (* double-backtick ``code`` -> the palette's "Code (Inline)": a literal,
    non-linkified monospace span (InlineCode), unlike Template Input. *)
@@ -1062,8 +1076,12 @@ resourceNotebook[resourceType_String, data0_] := Block[{template, data = Append[
         StringTrim[StringJoin[Cases[First[c], _String, Infinity]]] === "" :> Nothing;
     (* collapse the Definition section by default - the inlined source can be long.
        The section header is a "Section" cell tagged "Definition". *)
-    template /. Cell[CellGroupData[{hdr : Cell[_, "Section", ___, CellTags -> {___, "Definition", ___}, ___], body___}, Open], go___] :>
-        Cell[CellGroupData[{hdr, body}, Closed], go]
+    template = template /. Cell[CellGroupData[{hdr : Cell[_, "Section", ___, CellTags -> {___, "Definition", ___}, ___], body___}, Open], go___] :>
+        Cell[CellGroupData[{hdr, body}, Closed], go];
+    (* pin the deployed notebook to light mode so the cloud page never renders
+       dark (LightDark -> "Light" forces light regardless of the viewer theme). *)
+    Replace[template, Notebook[cells_, o___] :>
+        Notebook[cells, LightDark -> "Light", Sequence @@ FilterRules[{o}, Except[LightDark]]]]
 ]
 
 buildNotebook["FunctionResource", data_] := resourceNotebook["Function", data]
