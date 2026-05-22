@@ -1,0 +1,3 @@
+[submodule "examples/AccessibleColors"]
+	path = examples/AccessibleColors
+	url = https://github.com/sw1sh/AccessibleColors.git

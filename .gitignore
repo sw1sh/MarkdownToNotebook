@@ -1,0 +1,8 @@
+.DS_Store
+.claude/
+.paclet/
+*.paclet
+*.cache.wxf
+*.examples.wxf
+build/
+*.nb
