@@ -69,8 +69,9 @@ print["  cold run:    ", coldTime, " s"]
 {warmTime, warmResult} = AbsoluteTiming @ MarkdownToResourceFunction[src, "Output" -> "Association"]
 print["  warm run:    ", warmTime, " s (cache ", If[FileExistsQ[cacheFile], "hit", "miss"], ")"]
 
-(* phase 4: write the definition notebook to disk *)
-outNb = MarkdownToResourceFunction[src]
+(* phase 4: write the definition notebook to disk (a file target makes the
+   function write rather than just return the Notebook) *)
+outNb = MarkdownToResourceFunction[src, FileNameJoin[{dir, "MarkdownToNotebook.nb"}]]
 print["  wrote:       ", FileNameTake[outNb], " (", Head @ Quiet @ Get[outNb], ")"]
 
 (* phase 5: deploy the resource function publicly to the cloud (the docked

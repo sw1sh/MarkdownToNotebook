@@ -2,7 +2,7 @@
 Template: FunctionResource
 ResourceType: Function
 Name: MarkdownToNotebook
-Description: Convert a literate-markdown document (file, URL, or string) into a Wolfram notebook: a Function Repository definition, a documentation page, or a plain styled notebook, choosing the layout from a template and evaluating example cells with caching.
+Description: Convert a literate-markdown document into a Wolfram notebook using a template
 ContributedBy: Nikolay Murzin
 Keywords: [markdown, literate programming, function repository, notebook, documentation, templates]
 Categories: [Notebook Documents & Presentation]
@@ -31,22 +31,37 @@ contents of that local file or URL, resolved relative to this document.
 
 ## Details & Options
 
+The *source* can be a local file path, an `http(s)` URL, or a raw markdown string. The layout comes from the `Template` frontmatter key (`FunctionResource`, `Symbol`, `Guide`, `TechNote`, `Paclet`, or `Default`), and `MarkdownToResourceFunction[source]` is the `FunctionResource` specialization.
+
 A single template registry drives the layout. `FunctionResource` fills the slots of the official `FunctionResourceDefinition.nb` template (preserving its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates (`ObjectName`/`Usage`/`Examples`, `GuideTitle`/`GuideAbstract` and so on); and `Default` maps headings and code directly to standard notebook styles. The frontmatter keys mirror each template's metadata, so the author never writes cell styles.
+
+The following options can be given:
+
+| option | default | description |
+|---|---|---|
+| `"Output"` | `Automatic` | what to return: `"Notebook"`, `"Association"` (the parsed structure), or `"File"` |
+| `"Template"` | `Automatic` | override the `Template` frontmatter key |
+| `"Cache"` | `True` | reuse cached example outputs instead of re-evaluating |
+| `"CacheDirectory"` | `Automatic` | where the example-output cache is written |
+
+With `Automatic` output, `MarkdownToNotebook[source]` returns a `Notebook` and `MarkdownToNotebook[source, target]` writes the file *target*.
 
 This document and its `.wl` implementation live on GitHub, which renders the
 markdown directly: [github.com/sw1sh/MarkdownToNotebook](https://github.com/sw1sh/MarkdownToNotebook).
 
 To regenerate the definition notebook: get `MarkdownToNotebook.md` and
 `MarkdownToNotebook.wl` from the repository, evaluate `Get["MarkdownToNotebook.wl"]`
-to define the function, then `MarkdownToNotebook["MarkdownToNotebook.md"]`. The
-`#| file:` include in the Definition section pulls the code back in from the
+to define the function, then `MarkdownToNotebook["MarkdownToNotebook.md", "MarkdownToNotebook.nb"]`.
+The `#| file:` include in the Definition section pulls the code back in from the
 `.wl`, the example cells are evaluated and cached, and the `FunctionResource`
 template is filled, writing `MarkdownToNotebook.nb`. The whole loop (define from
-markdown, convert, publish) is what `bootstrap.wls` runs.
+markdown, convert, publish) is what `build.wls` runs.
 
 ## Usage
 
-`MarkdownToNotebook[source]` parses a literate-markdown `source`, which may be a local file path, an http(s) URL, or a raw markdown string. It picks a layout from the `Template` frontmatter key (`FunctionResource`, `Symbol`, `Guide`, or `Default`), evaluates the example cells with caching, and returns the notebook (writing it next to the source by default). `MarkdownToResourceFunction[source]` is the `FunctionResource` specialization. The option `"Output" -> "Association"` returns the parsed structure for inspection, and `"Cache" -> False` forces re-evaluation of every example cell.
+`MarkdownToNotebook[source]` converts a literate-markdown *source* into a Wolfram notebook and returns the `Notebook` expression.
+
+`MarkdownToNotebook[source, target]` writes the notebook to the file *target* and returns the file.
 
 ## Basic Examples
 
@@ -66,7 +81,7 @@ MarkdownToNotebook["---\nTemplate: Default\n---\n## Alpha\n\nx\n\n## Beta\n\ny",
 
 ## Options
 
-`"Output"` controls the return value: a written file (default), the `Notebook` expression, or an `Association` for inspection, which exposes the parsed metadata:
+`"Output"` controls the return value: the `Notebook` expression (default), an `Association` for inspection, which exposes the parsed metadata, or a written `"File"`:
 
 ```wl
 MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Output" -> "Association"]["Metadata"]

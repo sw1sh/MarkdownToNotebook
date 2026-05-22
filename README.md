@@ -48,8 +48,8 @@ ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Functi
 
 ```wl
 Get["MarkdownToNotebook.wl"];
-MarkdownToNotebook["path/to/doc.md"]            (* writes doc.nb beside the source *)
-MarkdownToNotebook[src, "Output" -> "Notebook"] (* return the Notebook expression *)
+MarkdownToNotebook["path/to/doc.md"]              (* returns the Notebook expression *)
+MarkdownToNotebook["path/to/doc.md", "doc.nb"]   (* also writes doc.nb, returns the file *)
 ```
 
 See [docs/README.md](docs/README.md) for the full conventions.

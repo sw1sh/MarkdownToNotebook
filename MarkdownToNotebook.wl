@@ -402,12 +402,26 @@ functionSlot[opts_, defCode_String] := If[ defCode === "",
     {Cell[BoxData[defCode], "Input", CellTags -> {"Function"}]}
 ]
 
-usageSlot[opts_, name_String, usage_String] := If[ usage === "",
-    slotDefault[opts],
-    slotDefault[opts] /. {
-        Cell[_, "UsageInputs", o___] :> cleanCell @ Cell[BoxData[RowBox[{name, "[", "arg", "]"}]], "UsageInputs", o],
-        Cell[_, "UsageDescription", o___] :> cleanCell @ Cell[usage, "UsageDescription", o]
-    }
+(* a Usage section is a sequence of usage statements, one per prose paragraph
+   that begins with a `code` span: the code is the signature (e.g.
+   `MarkdownToNotebook[source]`) and the rest is its description. The signature
+   is templated like the "Template Input" button (arguments italic, head linked)
+   and the description keeps its inline formatting. *)
+usageStatement[text_String] := StringCases[StringTrim[text],
+    StartOfString ~~ "`" ~~ c : Shortest[__] ~~ "`" ~~ rest___ :> {c, StringTrim[rest]}, 1]
+
+usagePair[{code_String, desc_String}] := {
+    Cell[BoxData[linkSymbols @ templateBox[code]], "UsageInputs", FontFamily -> "Source Sans Pro"],
+    Cell[TextData @ inlineTextData[desc], "UsageDescription"]
+}
+
+usageSlot[opts_, sections_] := Block[{pairs},
+    pairs = Flatten[
+        usageStatement /@ Cases[Lookup[sections, "usage", {}], b_ /; b["Type"] === "Prose" :> b["Text"]],
+        1
+    ];
+    If[ pairs === {}, Return[slotDefault[opts]] ];
+    {Cell[CellGroupData[Catenate[usagePair /@ pairs], Open]]}
 ]
 
 notesSlot[opts_, sections_] := Block[{prose = rawSectionText[sections, "details & options"]},
@@ -538,7 +552,7 @@ fillSlot[name_, opts_, data_] := Block[{meta = data["meta"]},
             ],
         "Function", functionSlot[opts, data["defCode"]],
         "HeroImage", heroSlot[opts, data["sections"]],
-        "Usage", usageSlot[opts, Lookup[meta, "Name", ""], sectionText[data["sections"], "usage"]],
+        "Usage", usageSlot[opts, data["sections"]],
         "Notes", notesSlot[opts, data["sections"]],
         "Details", notesSlot[opts, data["sections"]],
         "LongDescription", fillTextDataCells[opts, rawSectionText[data["sections"], "usage"]],
@@ -702,7 +716,9 @@ inlineTextData[text_String] := StringSplit[text, {
     "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
     "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
     "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
-    Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> Cell[BoxData[StyleBox[i, "TI"]], "InlineFormula"]
+    (* *word* -> an italic argument reference: a bare StyleBox in the TextData,
+       the form usage descriptions use (StyleBox[arg, "TI"]), not a formula cell *)
+    Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> StyleBox[i, "TI"]
 }]
 
 (* the usage head links to its own ref page ("Link Principal Symbols") - now
@@ -1037,6 +1053,13 @@ resourceNotebook[resourceType_String, data0_] := Block[{template, data = Append[
     (* ReplaceRepeated: some slots (e.g. the Compatibility group) nest sub-slots
        inside their DefaultValue, which a single pass would not reach. *)
     template = template //. TemplateSlot[n_, o___] :> Sequence @@ fillSlot[n, {o}, data];
+    (* the template seeds a blank standalone usage-input placeholder beside the
+       Usage slot (for a second usage line); we fill all usage from the markdown,
+       so drop any UsageInputs cell with no real content (matched by emptiness,
+       not a literal BoxData[] - the template's BoxData is a context-shadowed
+       symbol the bare pattern misses) rather than leave a blank usage line. *)
+    template = template /. c : Cell[_, "UsageInputs", ___] /;
+        StringTrim[StringJoin[Cases[First[c], _String, Infinity]]] === "" :> Nothing;
     (* collapse the Definition section by default - the inlined source can be long.
        The section header is a "Section" cell tagged "Definition". *)
     template /. Cell[CellGroupData[{hdr : Cell[_, "Section", ___, CellTags -> {___, "Definition", ___}, ___], body___}, Open], go___] :>
@@ -1052,11 +1075,14 @@ buildNotebook[_, data_] := defaultNotebook[data]
 
 (* === entry point === *)
 
-Options[MarkdownToNotebook] = {"Cache" -> True, "Output" -> "File", "Template" -> Automatic, "CacheDirectory" -> Automatic}
+Options[MarkdownToNotebook] = {"Cache" -> True, "Output" -> Automatic, "Template" -> Automatic, "CacheDirectory" -> Automatic}
 
-MarkdownToNotebook[file_String, opts : OptionsPattern[]] := MarkdownToNotebook[file, Automatic, opts]
+(* one argument: return the Notebook expression. two arguments: also write it to
+   the file target and return that file. The "Output" option overrides: "Notebook"
+   or "Association" always return (ignoring target); "File" always writes. *)
+MarkdownToNotebook[file_String, opts : OptionsPattern[]] := MarkdownToNotebook[file, None, opts]
 
-MarkdownToNotebook[file_String, outNbArg : (_String | Automatic), opts : OptionsPattern[]] := Block[{
+MarkdownToNotebook[file_String, outNbArg : (_String | None), opts : OptionsPattern[]] := Block[{
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cacheFile, cached, allHit, outputs, data, filled, outNb
 },
@@ -1101,11 +1127,12 @@ MarkdownToNotebook[file_String, outNbArg : (_String | Automatic), opts : Options
     data = <|"meta" -> meta, "blocks" -> blocks, "sections" -> sections, "defCode" -> defCode|>;
     filled = buildNotebook[tmplName, data];
 
-    outNb = Replace[outNbArg, Automatic :> FileNameJoin[{If[src["Local"], DirectoryName[file], Directory[]], src["Name"] <> ".nb"}]];
+    outNb = Replace[outNbArg, None :> FileNameJoin[{If[src["Local"], DirectoryName[file], Directory[]], src["Name"] <> ".nb"}]];
     Switch[OptionValue["Output"],
         "Notebook", filled,
         "Association", <|"Notebook" -> filled, "Metadata" -> meta, "Sections" -> Keys[sections], "Template" -> tmplName|>,
-        _, Export[outNb, filled, "NB"]
+        "File", Export[outNb, filled, "NB"],
+        _, If[outNbArg === None, filled, Export[outNb, filled, "NB"]]
     ]
 ]
 
