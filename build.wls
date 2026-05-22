@@ -80,7 +80,12 @@ print["build: deploying the resource function publicly to the cloud"]
 Needs["DefinitionNotebookClient`"]
 If[ Not[TrueQ[$CloudConnected]], Quiet @ CloudConnect[] ]
 If[ TrueQ[$CloudConnected],
-    deployed = UsingFrontEnd @ Block[{nbo = NotebookOpen[File[outNb]], res},
+    (* the deployed page is generated through the local front end; pin that session
+       to light so the published page is not rendered in dark mode (the build front
+       end resolves the Automatic appearance to Dark otherwise). *)
+    deployed = UsingFrontEnd @ Block[{nbo, res},
+        CurrentValue[$FrontEnd, LightDark] = "Light";
+        nbo = NotebookOpen[File[outNb]];
         res = DefinitionNotebookClient`DeployResource["Function", nbo, "CloudPublic"];
         NotebookClose[nbo];
         res

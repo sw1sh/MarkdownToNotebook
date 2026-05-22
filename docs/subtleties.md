@@ -125,18 +125,22 @@ links. So: use `ParseTextTemplate` only for the `UsageInputs` cells (pure
 signatures, no strings), and parse prose `` `code` `` literally with
 `ReparseBoxStructurePacket` (preserves strings, adds no italics or links).
 
-### Link only the documented paclet's own symbols inside `code`
-`ParseTextTemplate` leaves a paclet (non-System) symbol a plain `String`,
-expecting `DocumentationBuild` to linkify it - but that build never runs on a
-resource notebook. Link those yourself: replace any string that is a name in the
-documented paclet's context with
-`ButtonBox[name, BaseStyle->"Link", ButtonData->"paclet:Pub/Name/ref/name"]`.
-Do **not** auto-link System symbols in inline code - linking every `Notebook` /
-`ResourceFunction` is noise; write explicit `[text](paclet:…)` markdown links
-where a System-symbol link is actually wanted. When templating a usage signature,
-`stripLinks` (drop every `ButtonBox` wrapper, keep its content) first to undo
-`ParseTextTemplate`'s own System links, then re-link cleanly - otherwise a linked
-head gets wrapped a second time into a `ButtonBox[ButtonBox[…]]`.
+### Symbol linking is explicit, never inferred
+Auto-linking every recognized symbol inside backticks is noise (and double-wraps:
+`ParseTextTemplate` links a System symbol, then a re-link pass wraps it again into
+`ButtonBox[ButtonBox[…]]`). Instead, inline `` `code` `` is **never** linked, and
+links are author-controlled:
+
+- a `code`-wrapped markdown label is the "link this symbol" annotation -
+  `` [`WCAGContrastRatio`](paclet:Pub/Name/ref/WCAGContrastRatio) `` renders the
+  label in code/formula style as a reference link (a `ButtonBox` inside
+  `Cell[BoxData[…], "InlineFormula"]`), exactly like a See Also entry;
+- a plain label - `[the docs](https://…)` - is an ordinary prose hyperlink;
+- frontmatter lists (`SeeAlso`, `Links`, `RelatedGuides`) supply the rest.
+
+For a usage signature, still `stripLinks` (`//. ButtonBox[c_, ___] :> c`) the
+`ParseTextTemplate` output so its own eager System links are removed and the
+signature reads as code.
 
 ## Documentation pages
 
@@ -259,11 +263,22 @@ The docked Deploy > "Publicly in the cloud" action is
 returns unevaluated. Open it first:
 `UsingFrontEnd @ Block[{nbo = NotebookOpen[File[nb]], r}, r = DefinitionNotebookClient`DeployResource["Function", nbo, "CloudPublic"]; NotebookClose[nbo]; r]`.
 
-### Pin the deployed notebook to light mode
-The cloud renders the deployed notebook with the viewer's Light/Dark theme, so a
-dark-mode reader sees a dark definition page. Force light by setting the notebook
-option `LightDark -> "Light"` (a Wolfram 14.2+/15 notebook option) on the built
-`Notebook[…]` before writing/deploying.
+### Force light mode at *both* the notebook and the front-end session
+Dark mode bites in two places. (1) Set the notebook option `LightDark -> "Light"`
+(a Wolfram 14.2+/15 option; the value is the string `"Light"` - `Light`/`Dark` are
+not System symbols) on the built `Notebook[…]`. (2) That alone is **not enough**:
+the published page is regenerated through the local front end by `DeployResource`,
+and a headless build session resolves the `Automatic` appearance to `Dark`
+(`AbsoluteCurrentValue[CreateDocument[…], LightDark]` is `Dark`). So also pin the
+session before deploying: `CurrentValue[$FrontEnd, LightDark] = "Light"`. Same for
+any `Rasterize` of example output - bake `LightDark -> "Light"` into the rendered
+`Notebook[…]` so the image is light regardless of the session.
+
+### A `Notebook` result has no inline output form - rasterize it
+A bare `Notebook[…]` as an example output shows nothing on the cloud page (there is
+no typeset form for a whole notebook). To show the produced notebook inline,
+`Rasterize` the result into an image (`ToBoxes @ Rasterize[Append[nb, LightDark -> "Light"], ImageResolution -> 96]`)
+and store that as the output boxes.
 
 ### Drop the template's blank standalone usage placeholder
 The Function template seeds an empty `UsageInputs` cell beside the `Usage` slot

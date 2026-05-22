@@ -258,13 +258,24 @@ sectionText[sections_, key_] := StringRiffle[
 
 cumulativeHashes[cells_List] := Map[Hash, Rest @ FoldList[#1 <> mdSep <> #2["Code"] &, "", cells]]
 
+(* output boxes for an evaluated cell. A Notebook result has no inline typeset
+   form (the cloud shows nothing for a bare Notebook[...] output), so rasterize it
+   into an image of the rendered notebook - light mode pinned (LightDark -> "Light")
+   so the preview is not dark even when the build front end session is in dark mode. *)
+outputBoxes[res_] := Which[
+    res === Null, Null,
+    Head[res] === Notebook,
+        ToBoxes @ Quiet @ UsingFrontEnd @ Rasterize[Append[res, LightDark -> "Light"], ImageResolution -> 96],
+    True, ToBoxes[res]
+]
+
 accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res, tmp},
     (* Get a temp package so every top-level statement runs (ToExpression on a
        multi-statement string only takes the first); Get returns the last value. *)
     tmp = FileNameJoin[{$TemporaryDirectory, "mtnb-cell-" <> IntegerString[Hash[code], 36] <> ".wl"}];
     Export[tmp, b["Code"], "Text"];
     res = Quiet @ Get[tmp];
-    <|"code" -> code, "out" -> Append[state["out"], Hash[code] -> If[res === Null, Null, ToBoxes[res]]]|>
+    <|"code" -> code, "out" -> Append[state["out"], Hash[code] -> outputBoxes[res]]|>
 ]
 
 evaluateAll[cells_List, ctx_String, ctxPath_List] := Block[{$Context = ctx, $ContextPath = ctxPath},
@@ -411,7 +422,7 @@ usageStatement[text_String] := StringCases[StringTrim[text],
     StartOfString ~~ "`" ~~ c : Shortest[__] ~~ "`" ~~ rest___ :> {c, StringTrim[rest]}, 1]
 
 usagePair[{code_String, desc_String}] := {
-    Cell[BoxData[linkSymbols @ stripLinks @ templateBox[code]], "UsageInputs", FontFamily -> "Source Sans Pro"],
+    Cell[BoxData[stripLinks @ templateBox[code]], "UsageInputs", FontFamily -> "Source Sans Pro"],
     Cell[TextData @ inlineTextData[desc], "UsageDescription"]
 }
 
@@ -682,29 +693,17 @@ symbolInContextQ[name_String, ctx_String] := ctx =!= "" &&
 (* drop every ButtonBox link wrapper, keeping its content. ParseTextTemplate
    eagerly links any System symbol it recognizes (Notebook, ResourceFunction,
    ...), which renders as ugly inline links - especially a whole expression like
-   ResourceFunction["..."]. We strip those and re-link only the documented
-   paclet's own symbols below, so inline code reads as code, not a wall of links. *)
+   ResourceFunction["..."]. We strip those so a usage signature reads as code. *)
 stripLinks[boxes_] := boxes //. ButtonBox[content_, ___] :> content
 
-(* ParseTextTemplate leaves a paclet (non-System) symbol as a plain String,
-   expecting DocumentationBuild to linkify it - but that build never runs on a
-   resource notebook, so link the documented paclet's own symbols ourselves. A
-   generic System symbol is deliberately left unlinked (see stripLinks): linking
-   every Notebook/ResourceFunction inside backticks is noise, and explicit links
-   are written as markdown [text](paclet:...) instead. *)
-linkSymbols[boxes_] := If[ $docContext === "",
-    boxes,
-    boxes /. s_String /; symbolInContextQ[s, $docContext] :>
-        ButtonBox[s, BaseStyle -> "Link",
-            ButtonData -> If[$docPaclet =!= "", "paclet:" <> $docPaclet <> "/ref/" <> s, "paclet:ref/" <> s]]
-]
-
 (* prose inline `code`: parse it literally (inputBoxes preserves strings and adds
-   no template italics or System-symbol links), then link only the documented
-   paclet's own symbols. ParseTextTemplate is reserved for Usage signatures
-   (usagePair) where italic argument styling is wanted - on full code it would
-   italicize tokens even inside string literals ("doc.md" -> "...StyleBox[doc]..."). *)
-codeToInline[code_String] := Cell[BoxData[linkSymbols @ inputBoxes[code]], "InlineFormula"]
+   no template italics or links) - never auto-linked. Symbols are linked only when
+   the author asks, via an explicit markdown link with a `code`-wrapped label,
+   e.g. [`WCAGContrastRatio`](paclet:Wolfram/AccessibleColors/ref/WCAGContrastRatio)
+   (handled in linkInline). ParseTextTemplate is reserved for Usage signatures
+   (usagePair), where italic argument styling is wanted; on full code it would
+   even italicize tokens inside string literals ("doc.md" -> "...StyleBox[doc]..."). *)
+codeToInline[code_String] := Cell[BoxData[inputBoxes[code]], "InlineFormula"]
 
 (* double-backtick ``code`` -> the palette's "Code (Inline)": a literal,
    non-linkified monospace span (InlineCode), unlike Template Input. *)
@@ -718,11 +717,22 @@ mathInline[math_String] := Cell[BoxData[FormBox[inputBoxes[math], TraditionalFor
    "Custom URI"); [text](http...) -> a Hyperlink (palette "Link to URL"). The
    ButtonBox sits directly in the surrounding TextData (a text hyperlink), not
    wrapped in Cell[BoxData[...], "InlineFormula"] - the latter renders the link
-   text in code/formula style instead of as an inline prose link. *)
-linkInline[text_String, url_String] := If[
+   text in code/formula style instead of as an inline prose link.
+
+   A `code`-wrapped label is the explicit "link this symbol" annotation: it renders
+   the label in code/formula style as the link, i.e. a reference link the way
+   See Also entries look. So [`WCAGContrastRatio`](paclet:.../ref/WCAGContrastRatio)
+   is a code-styled symbol link, while [the docs](https://...) is a prose link. *)
+linkButton[text_String, url_String] := If[
     StringStartsQ[url, "paclet:"],
     ButtonBox[text, BaseStyle -> "Link", ButtonData -> url],
     ButtonBox[text, BaseStyle -> "Hyperlink", ButtonData -> {URL[url], None}]
+]
+
+linkInline[text_String, url_String] := If[
+    StringMatchQ[text, "`" ~~ ___ ~~ "`"],
+    Cell[BoxData @ linkButton[StringTake[text, {2, -2}], url], "InlineFormula"],
+    linkButton[text, url]
 ]
 
 inlineTextData[text_String] := StringSplit[text, {
@@ -735,8 +745,9 @@ inlineTextData[text_String] := StringSplit[text, {
     Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> StyleBox[i, "TI"]
 }]
 
-(* the usage head links to its own ref page ("Link Principal Symbols") - now
-   handled by linkSymbols inside codeToInline, since the head is a paclet symbol. *)
+(* a Symbol page's "## Usage" prose, rendered as one Usage cell with its inline
+   formatting. Symbols are linked only where the author wrote an explicit
+   [`Symbol`](paclet:...) link (see linkInline); inline `code` is not auto-linked. *)
 usageCell[rawUsage_String] := Cell[
     TextData @ Prepend[inlineTextData[StringTrim[rawUsage]], Cell["   ", "ModInfo"]],
     "Usage"
