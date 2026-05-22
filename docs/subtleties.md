@@ -111,6 +111,20 @@ resource notebook, `"ExampleSubsection"` on a doc page) so each option / sub-top
 gets its own heading like reference pages in the wild; the heading also separates
 examples, so reset the `In[]`/`Out[]` counter at it without an `ExampleDelimiter`.
 
+### Demonstrate a fenced cell with an escaped-newline one-liner
+To show ` ```wl … ``` ` inside an example (a string the converter then parses),
+keep the whole call on **one physical line** using escaped `\n`, e.g.
+`MarkdownToNotebook["` `` ``` `` `wl\nRange[5]^2\n` `` ``` `` `"]`. Real newlines
+would put a bare ` ``` ` at the start of a line, which both the fence splitter and
+GitHub read as a *closing* fence; a mid-line ` ``` ` inside a string literal is
+safe because fence detection only triggers at the start of a line.
+
+### The example section "Options" is for real options only
+A reference page's `## Options` section documents function *options*, one
+`### "Name"` subsubsection each. If the function has none, do not repurpose it -
+put "different uses" (result forms, source kinds, every markdown knob) under
+`## Scope`, each its own subsubsection, and drop `## Options` entirely.
+
 ### Rasterized images display at half size (DPI metadata)
 `Rasterize[expr, ImageResolution -> 144]` makes an image whose `ImageDimensions`
 (pixels) are 2x the layout points, but whose *displayed* size (`ImageSizeRaw` in

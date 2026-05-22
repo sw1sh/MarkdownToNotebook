@@ -66,40 +66,72 @@ Convert a markdown string into a notebook. The result is the explicit `Notebook`
 MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text."]
 ```
 
+Open the result with `NotebookPut` to see it rendered:
+
+```wl
+NotebookPut[MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text."]]
+```
+
+Prose formatting, inline code, and lists all carry through:
+
+```wl
+NotebookPut[MarkdownToNotebook["# Notes\n\nA *key* idea, with inline `code`:\n\n- first\n- second\n- third"]]
+```
+
 ## Scope
 
-A `#` heading becomes a `Title`, `##` a `Section`, and inline `` `code` `` and `*emphasis*` carry their formatting through to the cells. Open the result to see it rendered:
+The *source* is a file path, an `http(s)` URL, or a raw string, and the layout comes from the `Template` frontmatter key. The subsections below cover the markdown the converter understands and the results it returns.
+
+### Headings and prose
+
+`#` becomes a `Title`, `##` a `Section`, `###` a `Subsection`; blank-line-separated paragraphs become `Text`:
 
 ```wl
-NotebookPut[MarkdownToNotebook["# Demo\n\nInline `code` and *emphasis* in a paragraph.\n\n## Notes\n\nA second section."]]
+NotebookPut[MarkdownToNotebook["# Title\n\n## Section\n\n### Subsection\n\nA paragraph of text."]]
 ```
 
-## Options
+### Inline formatting
 
-The optional second argument selects the result.
-
-### Returning the notebook
-
-`MarkdownToNotebook[source]`, or `MarkdownToNotebook[source, "Notebook"]`, returns the `Notebook` expression:
+Inline `` `code` `` is formatted code, `*emphasis*` is italic, a double-backtick ``literal`` is a verbatim span, and `$...$` is inline math:
 
 ```wl
-Head[MarkdownToNotebook["# Title\n\nA paragraph.", "Notebook"]]
+NotebookPut[MarkdownToNotebook["Inline `Range[3]`, *emphasis*, ``verbatim``, and the value $Sin[x]$."]]
 ```
 
-### Returning the parsed structure
+### Links
 
-`MarkdownToNotebook[source, "Association"]` exposes the parsed frontmatter metadata, the section list, and the chosen template:
+`[label](url)` is a prose hyperlink; an empty backtick link `` [`Symbol`] `` infers a documentation reference; `` [`Symbol`](url) `` links explicitly:
+
+```wl
+NotebookPut[MarkdownToNotebook["See [`Range`] and the [Wolfram site](https://www.wolfram.com)."]]
+```
+
+### Lists and tables
+
+`-`, `*`, or `+` lines become items, and a GitHub-style pipe table becomes a grid:
+
+```wl
+NotebookPut[MarkdownToNotebook["- one\n- two\n\n| x | y |\n|---|---|\n| 1 | 2 |"]]
+```
+
+### Evaluated code cells
+
+A fenced `wl` cell is evaluated and its output kept (then cached); a cell may carry options such as `#| eval: false` to show code without running it:
+
+```wl
+NotebookPut[MarkdownToNotebook["```wl\nRange[5]^2\n```"]]
+```
+
+### Inlining a file
+
+A code cell whose first line is `#| file: path` is replaced by the contents of that local file or URL, resolved relative to the source — the mechanism the Definition section above uses to pull in `MarkdownToNotebook.wl`.
+
+### Returning a notebook, an association, or a file
+
+Omitted (or `"Notebook"`) returns the `Notebook`; `"Association"` returns the parsed structure for inspection; any other string writes the notebook to that file and returns it:
 
 ```wl
 MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Association"]["Metadata"]
-```
-
-### Writing to a file
-
-Any other string is a destination: the notebook is written there and the file is returned:
-
-```wl
-MarkdownToNotebook["# Title\n\nA paragraph.", FileNameJoin[{$TemporaryDirectory, "demo.nb"}]]
 ```
 
 ## Applications
@@ -120,8 +152,10 @@ MarkdownToNotebook["nonexistent.md", "Association"]["Sections"]
 
 ## Neat Examples
 
-The `Template` frontmatter key alone switches the layout, so the same converter and source style yield a guide, a symbol page, or a plain notebook. Here the key selects the layout reported back:
+A literate document — prose, inline math, and a live computation — converts into a notebook with the evaluated result rendered inline:
 
 ```wl
-MarkdownToNotebook["---\nTemplate: Guide\n---\n# Demo\n\ntext", "Association"]["Template"]
+NotebookPut[MarkdownToNotebook["# A sine wave\n\nThe plot of $Sin[x]$ over one period:\n\n```wl\nPlot[Sin[x], {x, 0, 2 Pi}]\n```\n\nIts mean value is zero."]]
 ```
+
+Because this very document is itself such a literate source — its `## Definition` inlines `MarkdownToNotebook.wl` and its frontmatter is the resource metadata — running the function on it reproduces this definition notebook, so the function publishes itself.
