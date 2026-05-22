@@ -125,22 +125,23 @@ links. So: use `ParseTextTemplate` only for the `UsageInputs` cells (pure
 signatures, no strings), and parse prose `` `code` `` literally with
 `ReparseBoxStructurePacket` (preserves strings, adds no italics or links).
 
-### Symbol linking is explicit, never inferred
+### Symbol linking is annotated, not inferred from bare `code`
 Auto-linking every recognized symbol inside backticks is noise (and double-wraps:
 `ParseTextTemplate` links a System symbol, then a re-link pass wraps it again into
-`ButtonBox[ButtonBox[…]]`). Instead, inline `` `code` `` is **never** linked, and
-links are author-controlled:
+`ButtonBox[ButtonBox[…]]`). So inline `` `code` `` is **never** linked; the author
+asks for a link with a markdown-link annotation, and the URL can be left implicit:
 
-- a `code`-wrapped markdown label is the "link this symbol" annotation -
-  `` [`WCAGContrastRatio`](paclet:Pub/Name/ref/WCAGContrastRatio) `` renders the
-  label in code/formula style as a reference link (a `ButtonBox` inside
-  `Cell[BoxData[…], "InlineFormula"]`), exactly like a See Also entry;
-- a plain label - `[the docs](https://…)` - is an ordinary prose hyperlink;
+- `[Notebook]` - an empty link (brackets, no `(url)`) - infers the ref URL from
+  the name (paclet context → `paclet:Pub/Name/ref/Name`, System → `paclet:ref/Name`)
+  and renders a code-styled reference link. This is the convenient form;
+- `` [`WCAGContrastRatio`](paclet:Pub/Name/ref/WCAGContrastRatio) `` - an explicit
+  URL with a `code`-wrapped label - is also a code-styled reference link;
+- `[the docs](https://…)` - a plain label with a URL - is an ordinary prose link;
 - frontmatter lists (`SeeAlso`, `Links`, `RelatedGuides`) supply the rest.
 
-For a usage signature, still `stripLinks` (`//. ButtonBox[c_, ___] :> c`) the
-`ParseTextTemplate` output so its own eager System links are removed and the
-signature reads as code.
+Order the `StringSplit` rules `[t](u)` **before** `[t]` so the URL form wins. For a
+usage signature, still `stripLinks` (`//. ButtonBox[c_, ___] :> c`) the
+`ParseTextTemplate` output so its own eager System links are removed.
 
 ## Documentation pages
 
@@ -274,11 +275,17 @@ session before deploying: `CurrentValue[$FrontEnd, LightDark] = "Light"`. Same f
 any `Rasterize` of example output - bake `LightDark -> "Light"` into the rendered
 `Notebook[…]` so the image is light regardless of the session.
 
-### A `Notebook` result has no inline output form - rasterize it
+### A `Notebook` result has no inline output form - render it with `CellPrint`
 A bare `Notebook[…]` as an example output shows nothing on the cloud page (there is
-no typeset form for a whole notebook). To show the produced notebook inline,
-`Rasterize` the result into an image (`ToBoxes @ Rasterize[Append[nb, LightDark -> "Light"], ImageResolution -> 96]`)
-and store that as the output boxes.
+no typeset form for a whole notebook), and rasterizing it to an image is lossy. The
+right way is the example itself: `CellPrint[First[MarkdownToNotebook[…]]]` renders
+the produced notebook's cells as real cells. To capture those in a headless build
+(no interactive notebook for `CellPrint` to write to), rebind it during evaluation:
+`Block[{CellPrint = (collect)}, Get[cell]]` where `collect` appends its cells to a
+buffer (this works even though `CellPrint` is `Protected` - `Block` localizes the
+value). Emit the collected cells into the Output area ahead of the result cell.
+`%`/`Out[]` history is **not** available under `Get`, so an example must thread the
+notebook through a variable (`nb = …; CellPrint[First[nb]]`), not `CellPrint[%]`.
 
 ### Drop the template's blank standalone usage placeholder
 The Function template seeds an empty `UsageInputs` cell beside the `Usage` slot

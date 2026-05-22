@@ -258,24 +258,21 @@ sectionText[sections_, key_] := StringRiffle[
 
 cumulativeHashes[cells_List] := Map[Hash, Rest @ FoldList[#1 <> mdSep <> #2["Code"] &, "", cells]]
 
-(* output boxes for an evaluated cell. A Notebook result has no inline typeset
-   form (the cloud shows nothing for a bare Notebook[...] output), so rasterize it
-   into an image of the rendered notebook - light mode pinned (LightDark -> "Light")
-   so the preview is not dark even when the build front end session is in dark mode. *)
-outputBoxes[res_] := Which[
-    res === Null, Null,
-    Head[res] === Notebook,
-        ToBoxes @ Quiet @ UsingFrontEnd @ Rasterize[Append[res, LightDark -> "Light"], ImageResolution -> 96],
-    True, ToBoxes[res]
-]
-
-accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res, tmp},
+accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res, tmp, prints = {}, collect},
     (* Get a temp package so every top-level statement runs (ToExpression on a
        multi-statement string only takes the first); Get returns the last value. *)
     tmp = FileNameJoin[{$TemporaryDirectory, "mtnb-cell-" <> IntegerString[Hash[code], 36] <> ".wl"}];
     Export[tmp, b["Code"], "Text"];
-    res = Quiet @ Get[tmp];
-    <|"code" -> code, "out" -> Append[state["out"], Hash[code] -> outputBoxes[res]]|>
+    (* Capture CellPrint cells so an example can render a produced notebook inline -
+       CellPrint[First[MarkdownToNotebook[...]]] - rather than returning an
+       unrenderable bare Notebook[...]. The collected cells become real Output-area
+       cells (see exampleIO), exactly as CellPrint would in an interactive notebook. *)
+    collect[args___] := (prints = Join[prints, Flatten[{args}]];);
+    res = Block[{CellPrint = collect}, Quiet @ Get[tmp]];
+    <|"code" -> code, "out" -> Append[state["out"], Hash[code] -> <|
+        "result" -> If[res === Null, Null, ToBoxes[res]],
+        "prints" -> prints
+    |>]|>
 ]
 
 evaluateAll[cells_List, ctx_String, ctxPath_List] := Block[{$Context = ctx, $ContextPath = ctxPath},
@@ -396,16 +393,26 @@ inputBoxes[code_String] := Block[{boxes, parsed},
     ]
 ]
 
-exampleIO[code_String, outBoxes_, n_Integer] := Block[{
-    inCell = Cell[BoxData[inputBoxes[code]], "Input", CellLabel -> "In[" <> ToString[n] <> "]:= "]
+(* an evaluated cell's output is stored as <|"result" -> boxes|Null, "prints" ->
+   {cells}|> (a plain boxes value or Missing is also accepted, for robustness).
+   The Output area is the captured CellPrint cells (rendered as-is, e.g. a produced
+   notebook's cells) followed by the result Output cell, grouped under the input. *)
+exampleIO[code_String, output_, n_Integer] := Block[{
+    inCell = Cell[BoxData[inputBoxes[code]], "Input", CellLabel -> "In[" <> ToString[n] <> "]:= "],
+    result, prints, outCells
 },
-    If[ MissingQ[outBoxes] || outBoxes === Null,
-        {inCell},
-        {Cell[CellGroupData[{
-            inCell,
-            Cell[BoxData[outBoxes], "Output", CellLabel -> "Out[" <> ToString[n] <> "]= "]
-        }, Open]]}
-    ]
+    {result, prints} = If[ AssociationQ[output],
+        {Lookup[output, "result", Null], Lookup[output, "prints", {}]},
+        {output, {}}
+    ];
+    outCells = Join[
+        prints,
+        If[ MissingQ[result] || result === Null,
+            {},
+            {Cell[BoxData[result], "Output", CellLabel -> "Out[" <> ToString[n] <> "]= "]}
+        ]
+    ];
+    If[ outCells === {}, {inCell}, {Cell[CellGroupData[Prepend[outCells, inCell], Open]]}]
 ]
 
 functionSlot[opts_, defCode_String] := If[ defCode === "",
@@ -451,6 +458,7 @@ notesSlot[opts_, sections_] := Block[{prose = rawSectionText[sections, "details 
 heroSlot[opts_, sections_] := Block[{cells = sectionCells[sections, "hero image"], out, code},
     If[ cells === {}, Return[slotDefault[opts]] ];
     out = First[cells]["OutputBoxes"];
+    out = If[AssociationQ[out], Lookup[out, "result", Null], out];
     code = First[cells]["Code"];
     If[ MissingQ[out] || out === Null, Return[slotDefault[opts]] ];
     {Cell[CellGroupData[{
@@ -735,8 +743,31 @@ linkInline[text_String, url_String] := If[
     linkButton[text, url]
 ]
 
+(* the ref-page URI a bare symbol name resolves to: a name in the documented
+   paclet's context links to its paclet ref page, a System symbol to its system
+   ref page; anything else does not resolve. *)
+inferURL[name_String] := Which[
+    symbolInContextQ[name, $docContext] && $docPaclet =!= "", "paclet:" <> $docPaclet <> "/ref/" <> name,
+    symbolInContextQ[name, $docContext], "paclet:ref/" <> name,
+    symbolInContextQ[name, "System`"], "paclet:ref/" <> name,
+    True, None
+]
+
+(* an "empty" markdown link [text] (no URL) is the convenient explicit annotation:
+   infer the URL from the symbol name and render a code-styled reference link, the
+   way auto-linking used to. A `code`-wrapped label is accepted too. If the name
+   does not resolve, fall back to plain inline code (or text). *)
+linkInferred[text_String] := Block[{name = If[StringMatchQ[text, "`" ~~ ___ ~~ "`"], StringTake[text, {2, -2}], text], url},
+    url = inferURL[name];
+    If[ url === None,
+        codeToInline[name],
+        Cell[BoxData @ ButtonBox[name, BaseStyle -> "Link", ButtonData -> url], "InlineFormula"]
+    ]
+]
+
 inlineTextData[text_String] := StringSplit[text, {
     "[" ~~ t : Shortest[Except["]"] ..] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> linkInline[t, u],
+    "[" ~~ t : Shortest[Except["]"] ..] ~~ "]" :> linkInferred[t],
     "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
     "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
     "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
