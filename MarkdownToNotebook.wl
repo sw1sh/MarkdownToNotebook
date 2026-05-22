@@ -299,6 +299,13 @@ cumulativeHashes[cells_List] := Map[Hash, Rest @ FoldList[#1 <> mdSep <> #2["Cod
    and evaluates the whole .wl during conversion) does not clobber an override. *)
 If[! ValueQ[$lightDark], $lightDark = "Light"]
 
+(* conversion nesting depth. A self-referential example (a doc whose example calls
+   MarkdownToNotebook on a document, e.g. the function on its own GitHub source)
+   would otherwise re-evaluate that document's examples, and so on without end. So
+   only the top-level conversion evaluates examples; a nested one builds the
+   notebook with its example cells left unevaluated (input only). *)
+If[! ValueQ[$convertDepth], $convertDepth = 0]
+
 (* the notebook a result stands for (a Notebook expression, or the open notebook of
    a NotebookObject), pinned to the current mode. *)
 resultNotebook[res_] := Append[If[Head[res] === NotebookObject, NotebookGet[res], res], LightDark -> $lightDark]
@@ -1362,9 +1369,13 @@ exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheL
      MarkdownToNotebook[source, file]          -> write the notebook to file, return it
    ("Notebook"/"Association" are reserved; a ".md" target writes markdown; any other
    string is a notebook file path.) The layout comes from the Template frontmatter. *)
-MarkdownToNotebook[file_String] := MarkdownToNotebook[file, Automatic]
+Options[MarkdownToNotebook] = {"Evaluate" -> True}
 
-MarkdownToNotebook[file_String, spec : (_String | Automatic)] := Block[{
+MarkdownToNotebook[file_String, opts : OptionsPattern[]] := MarkdownToNotebook[file, Automatic, opts]
+
+MarkdownToNotebook[file_String, spec : (_String | Automatic), opts : OptionsPattern[]] := Block[{
+    $convertDepth = $convertDepth + 1,
+    evalExamples = TrueQ[OptionValue[MarkdownToNotebook, {opts}, "Evaluate"]],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cached, allHit, outputs, data, filled
 },
@@ -1390,8 +1401,16 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic)] := Block[{
     ctxPath = DeleteDuplicates @ Flatten @ {Lookup[meta, "Context", Nothing], Context[MarkdownToNotebook], "System`"};
     cached = AssociationMap[exampleCacheGet, hashes];
     allHit = hashes =!= {} && AllTrue[cached, ! MissingQ[#] &];
-    outputs = If[ allHit, cached, evaluateAll[orderedCode, ctx, ctxPath] ];
-    If[ Not[allHit], KeyValueMap[exampleCacheSet, outputs] ];
+    (* "Evaluate" -> False leaves the example cells unevaluated (input only).
+       Nested conversions (an example converting another document) are forced to
+       that, so a self-referential document - one whose example converts its own
+       source - cannot recurse without end. *)
+    outputs = Which[
+        ! evalExamples || $convertDepth > 1, <||>,
+        allHit, cached,
+        True, evaluateAll[orderedCode, ctx, ctxPath]
+    ];
+    If[ evalExamples && $convertDepth <= 1 && Not[allHit], KeyValueMap[exampleCacheSet, outputs] ];
 
     blocks = annotateOutputs[blocks, hashes, outputs];
     sections = sectionsFrom[blocks];
