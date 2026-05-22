@@ -3,7 +3,7 @@ Template: FunctionResource
 ResourceType: Function
 Name: MarkdownToNotebook
 Description: Convert a literate-markdown document into a Wolfram notebook using a template
-ContributedBy: Nikolay Murzin
+ContributedBy: Nikolay Murzin, Claude (Anthropic)
 Keywords: [markdown, literate programming, function repository, notebook, documentation, templates]
 Categories: [Notebook Documents & Presentation]
 SeeAlso: [ResourceFunction, ResourceObject, CreateNotebook, DefineResourceFunction]
