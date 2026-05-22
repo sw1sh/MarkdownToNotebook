@@ -100,7 +100,7 @@ NotebookPut[MarkdownToNotebook["Inline `Range[3]`, *emphasis*, ``verbatim``, and
 
 ### Links
 
-`[label](url)` is a prose hyperlink; an empty backtick link `` [`Symbol`] `` infers a documentation reference; `` [`Symbol`](url) `` links explicitly:
+`[label](url)` is a prose hyperlink; a backticked label with no target — `` [`Symbol`] `` or `` [`Symbol`]() `` — infers a documentation reference; `` [`Symbol`](url) `` links explicitly:
 
 ```wl
 NotebookPut[MarkdownToNotebook["See [`Range`] and the [Wolfram site](https://www.wolfram.com)."]]
@@ -152,10 +152,8 @@ MarkdownToNotebook["nonexistent.md", "Association"]["Sections"]
 
 ## Neat Examples
 
-A literate document — prose, inline math, and a live computation — converts into a notebook with the evaluated result rendered inline:
+The `Template` frontmatter key alone switches the layout, so the same converter and source style yield a guide, a symbol page, or a plain notebook. Here the key selects the layout reported back:
 
 ```wl
-NotebookPut[MarkdownToNotebook["# A sine wave\n\nThe plot of $Sin[x]$ over one period:\n\n```wl\nPlot[Sin[x], {x, 0, 2 Pi}]\n```\n\nIts mean value is zero."]]
+MarkdownToNotebook["---\nTemplate: Guide\n---\n# Demo\n\ntext", "Association"]["Template"]
 ```
-
-Because this very document is itself such a literate source — its `## Definition` inlines `MarkdownToNotebook.wl` and its frontmatter is the resource metadata — running the function on it reproduces this definition notebook, so the function publishes itself.

@@ -162,10 +162,11 @@ links a System symbol, then a re-link pass wraps it again into
 `ButtonBox[ButtonBox[…]]`). So inline `` `code` `` is **never** linked, and a link
 only ever applies to backticked content:
 
-- `` [`Notebook`] `` - an empty *backtick* link (no `(url)`) - infers the ref URL
-  from the name (paclet context → `paclet:Pub/Name/ref/Name`, System →
-  `paclet:ref/Name`) and renders a code-styled reference link. A bare `[Notebook]`
-  with no backticks is **left as literal text** - never linked;
+- `` [`Notebook`] `` (or the empty-target form `` [`Notebook`]() ``) - a backtick
+  label with no real URL - infers the ref URL from the name (paclet context →
+  `paclet:Pub/Name/ref/Name`, System → `paclet:ref/Name`) and renders a code-styled
+  reference link. A bare `[Notebook]` with no backticks is **left as literal
+  text** - never linked;
 - `` [`WCAGContrastRatio`](paclet:Pub/Name/ref/WCAGContrastRatio) `` - an explicit
   URL with a `code`-wrapped label - is also a code-styled reference link;
 - `[the docs](https://…)` - a plain label with an explicit URL - is an ordinary
@@ -175,6 +176,14 @@ only ever applies to backticked content:
 Order the `StringSplit` rules `[t](u)` **before** `` [`t`] `` so the URL form wins.
 For a usage signature, still `stripLinks` (`//. ButtonBox[c_, ___] :> c`) the
 `ParseTextTemplate` output so its own eager System links are removed.
+
+### Every builder must run prose through `inlineTextData`
+Inline markup (links, `` `code` ``, `*emphasis*`, `$math$`) only renders if the
+prose is built with `inlineTextData`, not the raw string. The `Default`
+style-map builder emitting `Cell[text, "Text"]` instead of
+`Cell[TextData @ inlineTextData[text], "Text"]` is why a `` [`Range`] `` link (or
+any inline formatting) shows as literal text when converting a plain string with
+no frontmatter (which selects `Default`).
 
 ## Documentation pages
 

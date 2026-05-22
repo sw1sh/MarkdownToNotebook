@@ -744,10 +744,15 @@ linkButton[text_String, url_String] := If[
     ButtonBox[text, BaseStyle -> "Hyperlink", ButtonData -> {URL[url], None}]
 ]
 
-linkInline[text_String, url_String] := If[
-    StringMatchQ[text, "`" ~~ ___ ~~ "`"],
-    Cell[BoxData @ linkButton[StringTake[text, {2, -2}], url], "InlineFormula"],
-    linkButton[text, url]
+backtickedQ[text_String] := StringMatchQ[text, "`" ~~ ___ ~~ "`"]
+
+linkInline[text_String, url_String] := Which[
+    (* an empty target - [`Symbol`]() - infers the reference, like [`Symbol`] *)
+    url === "", If[backtickedQ[text], linkInferred[StringTake[text, {2, -2}]], text],
+    (* a `code`-wrapped label is a code-styled reference link *)
+    backtickedQ[text], Cell[BoxData @ linkButton[StringTake[text, {2, -2}], url], "InlineFormula"],
+    (* a plain label is an ordinary prose hyperlink *)
+    True, linkButton[text, url]
 ]
 
 (* the ref-page URI a bare symbol name resolves to: a name in the documented
@@ -1055,7 +1060,7 @@ defaultNotebook[data_] := Block[{counter = 0, cells},
     cells = Catenate @ Map[
         block |-> Switch[block["Type"],
             "Heading", {Cell[block["Text"], Lookup[$headingStyleMap, block["Level"], "Subsubsection"]]},
-            "Prose", {Cell[block["Text"], "Text"]},
+            "Prose", {Cell[TextData @ inlineTextData[block["Text"]], "Text"]},
             "List", Map[Cell[TextData @ inlineTextData[#], "Item"] &, block["Items"]],
             "Table", {tableCell[block]},
             "Code",
