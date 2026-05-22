@@ -488,10 +488,20 @@ exampleDelimiterCell := Cell["\t", "ExampleDelimiter"]
 (* shared example-content builder: prose -> a text cell of the given style,
    tables -> a GridBox, executable cells -> evaluated Input/Output. A new prose
    lead-in after earlier content starts a new example, so an ExampleDelimiter is
-   inserted before it and the In[]/Out[] counter restarts. *)
+   inserted before it and the In[]/Out[] counter restarts. A "### Heading" inside a
+   section becomes a subsubsection (an ExampleSubsection on doc pages), so options
+   and other sub-topics each get their own subsubsection like reference pages do;
+   the heading itself separates examples, so it resets the counter without a
+   delimiter. *)
+exampleSubStyle["ExampleText"] = "ExampleSubsection"
+exampleSubStyle[_] = "Subsubsection"
+
 exampleContent[sectionBlocks_, textStyle_String] := Block[{counter = 0, started = False, out = {}},
     Do[
         Which[
+            block["Type"] === "Heading",
+                AppendTo[out, Cell[TextData @ inlineTextData[block["Text"]], exampleSubStyle[textStyle]]];
+                counter = 0; started = False,
             block["Type"] === "Prose",
                 If[started, AppendTo[out, exampleDelimiterCell]; counter = 0];
                 AppendTo[out, Cell[TextData @ inlineTextData[block["Text"]], textStyle]];
@@ -1130,9 +1140,18 @@ buildNotebook["Guide", data_] := guideNotebook[data]
 buildNotebook["TechNote", data_] := tutorialNotebook[data]
 buildNotebook[_, data_] := defaultNotebook[data]
 
-(* === entry point === *)
+(* === example-output cache ===
+   Evaluated example outputs are cached with the built-in persistence framework -
+   a PersistentSymbol per cell, keyed by the cumulative hash, at the "Local"
+   location so it survives sessions. No cache option: manage it the standard way -
+   PersistentObjects["MarkdownToNotebook/**"] to list, DeleteObject to clear, and
+   $PersistencePath / PersistenceLocation to relocate. *)
+$cacheLocation = "Local"
+exampleCacheName[h_Integer] := "MarkdownToNotebook/ExampleOutput/" <> IntegerString[h, 36]
+exampleCacheGet[h_Integer] := PersistentSymbol[exampleCacheName[h], $cacheLocation]
+exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheLocation] = v;)
 
-Options[MarkdownToNotebook] = {"Cache" -> True, "CacheDirectory" -> Automatic}
+(* === entry point === *)
 
 (* the result is chosen by the optional second argument:
      MarkdownToNotebook[source]                -> the Notebook expression
@@ -1141,11 +1160,11 @@ Options[MarkdownToNotebook] = {"Cache" -> True, "CacheDirectory" -> Automatic}
      MarkdownToNotebook[source, file]          -> write the notebook to file, return it
    ("Notebook"/"Association" are reserved; any other string is a file path.) The
    layout always comes from the document's own Template frontmatter key. *)
-MarkdownToNotebook[file_String, opts : OptionsPattern[]] := MarkdownToNotebook[file, Automatic, opts]
+MarkdownToNotebook[file_String] := MarkdownToNotebook[file, Automatic]
 
-MarkdownToNotebook[file_String, spec : (_String | Automatic), opts : OptionsPattern[]] := Block[{
+MarkdownToNotebook[file_String, spec : (_String | Automatic)] := Block[{
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
-    orderedCode, hashes, cacheFile, cached, allHit, outputs, data, filled
+    orderedCode, hashes, cached, allHit, outputs, data, filled
 },
     src = resolveSource[file];
     text = src["Text"];
@@ -1165,22 +1184,10 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic), opts : OptionsPatt
     ctx = "MTNB$" <> IntegerString[Hash[text], 36] <> "`";
     (* let example cells resolve the documented paclet's symbols unqualified *)
     ctxPath = DeleteDuplicates @ Flatten @ {Lookup[meta, "Context", Nothing], "System`"};
-    cacheFile = With[{cacheDir = OptionValue["CacheDirectory"]},
-        Which[
-            StringQ[cacheDir], FileNameJoin[{cacheDir, src["Name"] <> ".cache.wxf"}],
-            src["Local"], file <> ".cache.wxf",
-            True, FileNameJoin[{$TemporaryDirectory, "mtnb-" <> IntegerString[Hash[src["Id"]], 36] <> ".cache.wxf"}]
-        ]
-    ];
-    cached = If[ TrueQ[OptionValue["Cache"]] && FileExistsQ[cacheFile], Import[cacheFile, "WXF"], <||>];
-    allHit = hashes =!= {} && AllTrue[hashes, KeyExistsQ[cached, #] &];
-    outputs = If[ TrueQ[OptionValue["Cache"]] && allHit,
-        KeyTake[cached, hashes],
-        evaluateAll[orderedCode, ctx, ctxPath]
-    ];
-    If[ TrueQ[OptionValue["Cache"]] && hashes =!= {} && Not[allHit],
-        Export[cacheFile, outputs, "WXF"]
-    ];
+    cached = AssociationMap[exampleCacheGet, hashes];
+    allHit = hashes =!= {} && AllTrue[cached, ! MissingQ[#] &];
+    outputs = If[ allHit, cached, evaluateAll[orderedCode, ctx, ctxPath] ];
+    If[ Not[allHit], KeyValueMap[exampleCacheSet, outputs] ];
 
     blocks = annotateOutputs[blocks, hashes, outputs];
     sections = sectionsFrom[blocks];

@@ -13,7 +13,6 @@ docsDir = DirectoryName[$InputFileName]
 repoDir = ParentDirectory[docsDir]
 imagesDir = FileNameJoin[{docsDir, "images"}]
 acDir = FileNameJoin[{repoDir, "examples", "AccessibleColors"}]
-cacheDir = FileNameJoin[{acDir, "build", "cache"}]
 
 Get[FileNameJoin[{repoDir, "MarkdownToNotebook.wl"}]]
 Needs["DocumentationBuild`"]
@@ -34,7 +33,7 @@ saveImage[img_, name_] := (
 
 (* convert a markdown doc to its authoring notebook expression *)
 authoringNotebook[mdFile_String] :=
-    MarkdownToNotebook[mdFile, "Notebook", "CacheDirectory" -> cacheDir]
+    MarkdownToNotebook[mdFile, "Notebook"]
 
 (* a built reference/guide page: convert, then run DocumentationBuild (the
    Preview button) and rasterize the resulting page at a fixed width *)

@@ -60,9 +60,10 @@ SomeCode
 
 Every executable cell is evaluated in document order in a private context, so a
 cell's cache key is a cumulative hash of all preceding cells (whole-notebook
-sequential evaluation). Re-converting an unchanged document reuses cached
-outputs. Cache files: `<doc>.cache.wxf`, or a directory via
-`"CacheDirectory"`.
+sequential evaluation). Re-converting an unchanged document reuses cached outputs,
+stored with the built-in persistence framework as a `PersistentSymbol` per cell at
+the `"Local"` location (`PersistentObjects["MarkdownToNotebook/ExampleOutput/*"]`
+to list, `DeleteObject` to clear).
 
 ## Links  [partial]
 

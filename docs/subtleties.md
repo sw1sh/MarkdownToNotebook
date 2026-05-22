@@ -88,11 +88,28 @@ A See Also / More About entry that names a **System** symbol (e.g.
 Also link whose ref page is missing from the local doc index - new System
 symbols may warn locally yet resolve in a full/published environment.
 
+### Cache example outputs with the persistence framework, not a custom option
+Cache evaluated example outputs with the built-in persistence framework - a
+`PersistentSymbol[name, "Local"]` per cell, keyed by the cumulative hash - rather
+than a custom `"Cache"` option and a `.wxf` file. An unset symbol reads back as
+`Missing["Nonexistent", …]` (so `MissingQ` is the cache-miss test), it survives
+sessions at the `"Local"` `PersistenceLocation`, and it is managed with the
+standard tools: `PersistentObjects["MarkdownToNotebook/ExampleOutput/*", "Local"]`
+to list, `DeleteObject` to clear, `$PersistencePath`/`PersistenceLocation` to
+relocate. (`PersistentValue` is obsolete - use `PersistentSymbol`.)
+
 ### Clear the cache when the package definition changes
-The example cache keys on a cumulative hash of the *code cells*, not on the paclet
+The cache keys on a cumulative hash of the *code cells*, not the paclet
 definitions. Changing a function's behavior (e.g. `WCAGLevel` returning
 `Missing[…]` instead of `"Fail"`) with the example code unchanged reuses the stale
-cached outputs - delete the cache directory before rebuilding.
+cached output - clear the persistent objects (above) before rebuilding.
+
+### A `###` heading inside an example section is a subsubsection
+`sectionsFrom` groups on headings of level ≤ 2, so a level-3 `### Title` stays a
+block *inside* the section. Render it as a subsubsection (`"Subsubsection"` in a
+resource notebook, `"ExampleSubsection"` on a doc page) so each option / sub-topic
+gets its own heading like reference pages in the wild; the heading also separates
+examples, so reset the `In[]`/`Out[]` counter at it without an `ExampleDelimiter`.
 
 ### Rasterized images display at half size (DPI metadata)
 `Rasterize[expr, ImageResolution -> 144]` makes an image whose `ImageDimensions`

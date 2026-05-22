@@ -35,12 +35,9 @@ The *source* can be a local file path, an `http(s)` URL, or a raw markdown strin
 
 A single template registry drives the layout. `FunctionResource` fills the slots of the official `FunctionResourceDefinition.nb` template (preserving its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates (`ObjectName`/`Usage`/`Examples`, `GuideTitle`/`GuideAbstract` and so on); and `Default` maps headings and code directly to standard notebook styles. The frontmatter keys mirror each template's metadata, so the author never writes cell styles.
 
-The optional second argument selects the result: omitted (or `"Notebook"`) returns the `Notebook` expression, `"Association"` returns the parsed structure for inspection, and a file name writes the notebook to that file. The following options can also be given:
+The optional second argument selects the result: omitted (or `"Notebook"`) returns the `Notebook` expression, `"Association"` returns the parsed structure for inspection, and a file name writes the notebook to that file. There are no options.
 
-| option | default | description |
-|---|---|---|
-| `"Cache"` | `True` | reuse cached example outputs instead of re-evaluating |
-| `"CacheDirectory"` | `Automatic` | where the example-output cache is written |
+Evaluated example outputs are cached automatically with the built-in persistence framework, as a `PersistentSymbol` per cell (under the `"MarkdownToNotebook/ExampleOutput/"` name at the `"Local"` `PersistenceLocation`), keyed by a cumulative hash of the cells, so re-runs reuse them across sessions. Manage the cache the standard way: `PersistentObjects["MarkdownToNotebook/ExampleOutput/*", "Local"]` lists it, `DeleteObject` clears it, and `$PersistencePath` / `PersistenceLocation` relocate it.
 
 This document and its `.wl` implementation live on GitHub, which renders the
 markdown directly: [github.com/sw1sh/MarkdownToNotebook](https://github.com/sw1sh/MarkdownToNotebook).
@@ -63,15 +60,15 @@ markdown, convert, publish) is what `build.wls` runs.
 
 ## Basic Examples
 
-Convert a markdown string into a notebook and open it. `MarkdownToNotebook` returns a `Notebook`, so `NotebookPut` displays it:
+Convert a markdown string into a notebook. The result is the explicit `Notebook` expression:
 
 ```wl
-NotebookPut[MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text."]]
+MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text."]
 ```
 
 ## Scope
 
-A `#` heading becomes a `Title`, `##` a `Section`, and inline `` `code` `` and `*emphasis*` carry their formatting through to the cells:
+A `#` heading becomes a `Title`, `##` a `Section`, and inline `` `code` `` and `*emphasis*` carry their formatting through to the cells. Open the result to see it rendered:
 
 ```wl
 NotebookPut[MarkdownToNotebook["# Demo\n\nInline `code` and *emphasis* in a paragraph.\n\n## Notes\n\nA second section."]]
@@ -79,16 +76,30 @@ NotebookPut[MarkdownToNotebook["# Demo\n\nInline `code` and *emphasis* in a para
 
 ## Options
 
-The parsed structure returned by `"Association"` exposes the frontmatter metadata, the section list, and the chosen template:
+The optional second argument selects the result.
+
+### Returning the notebook
+
+`MarkdownToNotebook[source]`, or `MarkdownToNotebook[source, "Notebook"]`, returns the `Notebook` expression:
+
+```wl
+Head[MarkdownToNotebook["# Title\n\nA paragraph.", "Notebook"]]
+```
+
+### Returning the parsed structure
+
+`MarkdownToNotebook[source, "Association"]` exposes the parsed frontmatter metadata, the section list, and the chosen template:
 
 ```wl
 MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Association"]["Metadata"]
 ```
 
-`"Cache" -> False` re-evaluates every example cell instead of reusing the cache:
+### Writing to a file
+
+Any other string is a destination: the notebook is written there and the file is returned:
 
 ```wl
-Head[MarkdownToNotebook["# Title\n\nA paragraph.", "Cache" -> False]]
+MarkdownToNotebook["# Title\n\nA paragraph.", FileNameJoin[{$TemporaryDirectory, "demo.nb"}]]
 ```
 
 ## Applications

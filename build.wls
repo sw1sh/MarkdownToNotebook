@@ -54,10 +54,11 @@ If[ DownValues[MarkdownToNotebook] === {},
     print["  warn: MarkdownToNotebook has no definition"]
 ]
 
-(* phase 2: run the function on its own source (cold) *)
+(* phase 2: run the function on its own source (cold). Clear the persistent example
+   cache first (the built-in mechanism the converter now uses) so this is a true
+   cold run. *)
 print["build: converting itself (cold run)"]
-cacheFile = src <> ".cache.wxf"
-If[ FileExistsQ[cacheFile], DeleteFile[cacheFile] ]
+Scan[DeleteObject, PersistentObjects["MarkdownToNotebook/ExampleOutput/*", "Local"]]
 
 {coldTime, result} = AbsoluteTiming @ MarkdownToNotebook[src, "Association"]
 nb = result["Notebook"]
@@ -70,9 +71,9 @@ print["  Output cells:   ", Count[nb, Cell[_, "Output", ___], Infinity], " (eval
 print["  Unfilled slots: ", Count[nb, _TemplateSlot, Infinity]]
 print["  cold run:    ", coldTime, " s"]
 
-(* phase 3: re-run to demonstrate the example cache (no re-evaluation) *)
+(* phase 3: re-run to demonstrate the persistent example cache (no re-evaluation) *)
 {warmTime, warmResult} = AbsoluteTiming @ MarkdownToNotebook[src, "Association"]
-print["  warm run:    ", warmTime, " s (cache ", If[FileExistsQ[cacheFile], "hit", "miss"], ")"]
+print["  warm run:    ", warmTime, " s (", Length @ PersistentObjects["MarkdownToNotebook/ExampleOutput/*", "Local"], " cached)"]
 
 (* phase 4: write the definition notebook to disk (a file target makes the
    function write rather than just return the Notebook) *)
