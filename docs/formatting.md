@@ -23,9 +23,17 @@ markdown for each (most **[todo]**):
 |---|---|---|
 | Template Input | `InlineFormula` | `` `code` `` **[done]** |
 | Code (Inline) | `InlineCode` | `` ``code`` `` (double) **[done]** |
-| Italic / argument | `StyleBox[…,"TI"]` | `*arg*` **[done]** |
+| Italic / argument | `StyleBox[…,"TI"]` | `*italic*` or `_italic_` **[done]** |
+| Bold | `StyleBox[…,FontWeight->"Bold"]` | `**bold**` or `__bold__` **[done]** |
+| Bold italic | `StyleBox[…,"TI",FontWeight->"Bold"]` | `***both***` **[done]** |
+| Strikethrough | `StyleBox[…,FontVariations->{"StrikeThrough"->True}]` | `~~struck~~` **[done]** |
 | Plain Text / Literal | `InlineFormula` literal string | `` `"literal"` `` (a string parses to itself) **[done, implicit]** |
 | Traditional Math | `FormBox[…,TraditionalForm]` | `$math$` **[done]** |
+| Inline image | embedded graphic (or link fallback) | `![alt](src)` mid-text **[done]** |
+
+Underscore emphasis is matched only at word boundaries, so `snake_case` in prose is
+left alone (use `*…*` if a single word ever needs emphasis). A backslash escapes the
+next punctuation character (`\*`, `` \` ``, `\_`, ...) so it renders literally.
 
 ## Code cells  [done]
 
@@ -93,6 +101,15 @@ Consecutive `- `, `* ` or `+ ` lines become a list block. In a guide's
 `## Functions` section each item renders as an `InlineGuideFunction` chip (the
 leading `` `Symbol` `` linked to its ref page) followed by the description; in
 the default template list items become `Item` cells.
+
+Ordered lists (`1.`, `2.`, ... or `1)`, `2)`) become a numbered list (`ItemNumbered`
+cells). Task-list items (`- [ ]` / `- [x]`) render with a ballot-box glyph (☐ / ☑)
+in place of the marker.
+
+## Blockquotes  [done]
+
+Consecutive `> ` lines become a `Quote`: a `Text` cell set off by a left rule and
+indent (self-styled, so it works in every template's stylesheet).
 
 ## Tables  [done]
 

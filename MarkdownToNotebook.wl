@@ -117,7 +117,8 @@ fenceSplit[lines_List, collected_] := If[ fenceQ[First[lines]],
 
 paraSplit[{}, collected_] := {Reverse[collected], {}}
 paraSplit[lines_List, collected_] := Block[{line = First[lines]},
-    If[ StringTrim[line] === "" || fenceQ[line] || headingQ[line] || listItemQ[line],
+    If[ StringTrim[line] === "" || fenceQ[line] || headingQ[line] || listItemQ[line] ||
+            orderedItemQ[line] || blockquoteQ[line],
         {Reverse[collected], lines},
         paraSplit[Rest[lines], Prepend[collected, line]]
     ]
@@ -130,7 +131,37 @@ listItemQ[line_String] := Block[{t = StringTrim[line]},
     StringLength[t] >= 2 && MemberQ[{"-", "*", "+"}, StringTake[t, 1]] && StringTake[t, {2}] === " "
 ]
 
-listText[line_String] := StringTrim @ StringDrop[StringTrim[line], 2]
+listText[line_String] := taskCheckbox @ StringTrim @ StringDrop[StringTrim[line], 2]
+
+(* a GitHub task-list item "[ ] ..." / "[x] ..." -> a ballot-box glyph before the
+   text (unchecked U+2610, checked U+2611), so the checkbox renders instead of a
+   literal "[ ]". *)
+taskCheckbox[t_String] := Which[
+    StringStartsQ[t, "[ ] "], "\:2610 " <> StringDrop[t, 4],
+    StringStartsQ[t, "[x] " | "[X] "], "\:2611 " <> StringDrop[t, 4],
+    True, t
+]
+
+(* ordered list items: "1. ", "2) ", ... (a run of digits, then "." or ")", then a
+   space). The marker is dropped; the List block is tagged "Ordered" so it renders
+   numbered. *)
+orderedItemQ[line_String] := StringMatchQ[StringTrim[line], DigitCharacter .. ~~ ("." | ")") ~~ " " ~~ ___]
+orderedText[line_String] := StringTrim @ StringReplace[StringTrim[line], StartOfString ~~ DigitCharacter .. ~~ ("." | ")") ~~ " " -> ""]
+orderedSplit[{}, collected_] := {Reverse[collected], {}}
+orderedSplit[lines_List, collected_] := If[ orderedItemQ[First[lines]],
+    orderedSplit[Rest[lines], Prepend[collected, orderedText[First[lines]]]],
+    {Reverse[collected], lines}
+]
+
+(* blockquote lines start with ">". Consecutive lines are gathered and the marker
+   ("> " or ">") stripped; the joined text becomes a "Quote" block. *)
+blockquoteQ[line_String] := StringStartsQ[StringTrim[line], ">"]
+quoteText[line_String] := StringReplace[StringTrim[line], StartOfString ~~ ">" ~~ (" " | "") -> ""]
+quoteSplit[{}, collected_] := {Reverse[collected], {}}
+quoteSplit[lines_List, collected_] := If[ blockquoteQ[First[lines]],
+    quoteSplit[Rest[lines], Prepend[collected, quoteText[First[lines]]]],
+    {Reverse[collected], lines}
+]
 
 (* a thematic break - a line of only "-", "_" or "*" (3+) between blank lines -
    is an explicit example separator (an ExampleDelimiter). Frontmatter "---" is
@@ -197,6 +228,10 @@ blockLoop[lines_List, acc_] := Block[{line = First[lines], rest = Rest[lines], s
         separatorQ[line],
             blockLoop[rest, Prepend[acc, <|"Type" -> "Separator"|>]]
         ,
+        blockquoteQ[line],
+            split = quoteSplit[lines, {}];
+            blockLoop[Last[split], Prepend[acc, <|"Type" -> "Quote", "Text" -> StringRiffle[First[split], " "]|>]]
+        ,
         tableRowLineQ[line] && rest =!= {} && tableSepQ[First[rest]],
             split = tableSplit[lines, {}];
             With[{rows = splitTableRow /@ First[split]},
@@ -206,6 +241,10 @@ blockLoop[lines_List, acc_] := Block[{line = First[lines], rest = Rest[lines], s
         listItemQ[line],
             split = listSplit[lines, {}];
             blockLoop[Last[split], Prepend[acc, <|"Type" -> "List", "Items" -> First[split]|>]]
+        ,
+        orderedItemQ[line],
+            split = orderedSplit[lines, {}];
+            blockLoop[Last[split], Prepend[acc, <|"Type" -> "List", "Ordered" -> True, "Items" -> First[split]|>]]
         ,
         True,
             split = paraSplit[lines, {}];
@@ -588,11 +627,25 @@ usageSlot[opts_, sections_] := Block[{pairs},
 (* the Details & Options notes: one "Notes" cell per item, so each renders as its
    own bullet (the reference-page convention) - a paragraph is one note, a markdown
    list is one note per item, a table becomes a grid. *)
+(* a blockquote -> a Text cell set off by a left rule and indent, the way GitHub
+   renders "> ...". Self-styled (CellFrame / CellMargins), so it does not depend on
+   a Quote cell style being present in the template's stylesheet. *)
+quoteCell[text_String] := Cell[TextData @ inlineTextData[text], "Text",
+    CellFrame -> {{3, 0}, {0, 0}}, CellFrameColor -> GrayLevel[0.7],
+    CellFrameMargins -> 8, CellMargins -> {{50, 10}, {7, 7}}]
+
+(* list items as cells of the given bullet style, numbered ("ItemNumbered") when the
+   block is an ordered list. *)
+listItemCells[block_, base_String] := With[{style = If[TrueQ[block["Ordered"]], "ItemNumbered", base]},
+    Map[Cell[TextData @ inlineTextData[#], style] &, block["Items"]]
+]
+
 detailsCells[sections_] := Catenate @ Map[
     block |-> Switch[block["Type"],
         "Prose", {Cell[TextData @ inlineTextData[block["Text"]], "Notes"]},
-        "List", Map[Cell[TextData @ inlineTextData[#], "Notes"] &, block["Items"]],
+        "List", listItemCells[block, "Notes"],
         "Table", {tableCell[block]},
+        "Quote", {quoteCell[block["Text"]]},
         _, {}
     ],
     Lookup[sections, "details & options", {}]
@@ -672,6 +725,10 @@ exampleContent[sectionBlocks_, textStyle_String] := Block[{counter = 0, out = {}
                 AppendTo[out, Cell[TextData @ inlineTextData[block["Text"]], textStyle]],
             block["Type"] === "Table",
                 AppendTo[out, tableCell[block]],
+            block["Type"] === "List",
+                out = Join[out, listItemCells[block, "Item"]],
+            block["Type"] === "Quote",
+                AppendTo[out, quoteCell[block["Text"]]],
             block["Type"] === "Image",
                 AppendTo[out, imageCell[block]],
             executableQ[block],
@@ -896,6 +953,44 @@ codeToInline[code_String] := Cell[BoxData[inputBoxes[code]], "InlineFormula"]
    analysis "extra whitespace" check, so trim them. *)
 literalCodeInline[code_String] := Cell[BoxData[StyleBox[StringTrim[code], "InlineCode"]], "InlineCode"]
 
+(* inline emphasis -> styled text runs. Bold is FontWeight, strikethrough a
+   FontVariation; italic keeps the "TI" (text-italic) style usage descriptions
+   already mark arguments with. The styled content is a plain string (not re-parsed),
+   so a single emphasis level is supported, which covers ordinary prose. *)
+emBoldBox[s_String] := StyleBox[s, FontWeight -> "Bold"]
+emItalicBox[s_String] := StyleBox[s, "TI"]
+emBoldItalicBox[s_String] := StyleBox[s, "TI", FontWeight -> "Bold"]
+emStrikeBox[s_String] := StyleBox[s, FontVariations -> {"StrikeThrough" -> True}]
+
+(* underscore emphasis (_em_, __strong__), applied to a plain prose run *after* the
+   main split has pulled out code / links / math. CommonMark only treats underscores
+   as emphasis at word boundaries, so a snake_case identifier in prose is left alone;
+   enforce that with lookarounds, then split on private-use sentinels (the regex
+   replacement string cannot itself build boxes). *)
+underscoreEm[s_String] := If[! StringContainsQ[s, "_"], {s},
+    StringSplit[
+        StringReplace[s, {
+            RegularExpression["(?<![A-Za-z0-9_])__(\\S|\\S.*?\\S)__(?![A-Za-z0-9_])"] -> "\:f8f1$1\:f8f2",
+            RegularExpression["(?<![A-Za-z0-9_])_(\\S|\\S.*?\\S)_(?![A-Za-z0-9_])"] -> "\:f8f3$1\:f8f4"
+        }],
+        {
+            "\:f8f1" ~~ c : Shortest[__] ~~ "\:f8f2" :> emBoldBox[c],
+            "\:f8f3" ~~ c : Shortest[__] ~~ "\:f8f4" :> emItalicBox[c]
+        }
+    ]
+]
+
+(* an inline image ![alt](src): embed the imported graphic, or, when it cannot be
+   loaded (e.g. a path relative to a base this context does not have), fall back to a
+   plain link so the text is never left with a stray "!" the way an unhandled image
+   span would be. *)
+inlineImage[alt_String, src_String] := Block[{img = Quiet @ Import[src]},
+    If[ MatchQ[img, _Image | _Graphics | _Legended | _Graphics3D],
+        Cell[BoxData @ ToBoxes[img], "InlineFormula"],
+        linkButton[If[StringTrim[alt] === "", src, alt], src]
+    ]
+]
+
 (* $math$ -> inline math. The content is TeX (LaTeX math notation): ImportString
    parses "$...$" into typeset boxes (SqrtBox, FractionBox, ...). Fall back to a
    Wolfram-expression parse in TraditionalForm if the TeX parse fails. *)
@@ -958,16 +1053,30 @@ linkInferred[name_String] := Block[{url = inferURL[name]},
 ]
 
 inlineTextData[text_String] := Replace[
-    StringSplit[text, {
-        "[" ~~ t : Shortest[Except["]"] ..] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> linkInline[t, u],
-        "[`" ~~ t : Shortest[Except["`"] ..] ~~ "`]" :> linkInferred[t],
-        "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
-        "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
-        "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
-        (* *word* -> an italic argument reference: a bare StyleBox in the TextData,
-           the form usage descriptions use (StyleBox[arg, "TI"]), not a formula cell *)
-        Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> StyleBox[i, "TI"]
-    }],
+    (* underscore emphasis runs last, on the plain-text runs the main split leaves
+       behind, so its word-boundary check never sees code / link / math content. *)
+    Replace[
+        StringSplit[text, {
+            (* a backslashed ASCII punctuation is that literal char (so \* is not
+               emphasis); listed first so the escape wins before the marker rules. *)
+            "\\" ~~ c : PunctuationCharacter :> c,
+            (* an inline image is a link with a leading "!"; match it before the link *)
+            "![" ~~ a : Shortest[Except["]"] ...] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> inlineImage[a, u],
+            "[" ~~ t : Shortest[Except["]"] ..] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> linkInline[t, u],
+            "[`" ~~ t : Shortest[Except["`"] ..] ~~ "`]" :> linkInferred[t],
+            "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
+            "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
+            "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
+            "~~" ~~ s : Shortest[__] ~~ "~~" :> emStrikeBox[s],
+            "***" ~~ s : Shortest[__] ~~ "***" :> emBoldItalicBox[s],
+            "**" ~~ s : Shortest[__] ~~ "**" :> emBoldBox[s],
+            (* *word* -> italic: the StyleBox["TI"] form usage descriptions mark
+               arguments with (not a formula cell) *)
+            Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> emItalicBox[i]
+        }],
+        s_String :> Sequence @@ underscoreEm[s],
+        {1}
+    ],
     (* a literal "..." in prose should be the single ellipsis character (the
        notebook analysis flags three dots); only the plain-text runs are touched. *)
     s_String :> StringReplace[s, "..." -> "\[Ellipsis]"],
@@ -1224,8 +1333,9 @@ tutorialBody[blocks_] := Block[{counter = 0},
         block |-> Switch[block["Type"],
             "Heading", If[block["Level"] <= 1, {}, {Cell[block["Text"], Lookup[$tutorialHeadingStyle, block["Level"], "Subsubsection"]]}],
             "Prose", {Cell[TextData @ inlineTextData[block["Text"]], "Text"]},
-            "List", Map[Cell[TextData @ inlineTextData[#], "Item"] &, block["Items"]],
+            "List", listItemCells[block, "Item"],
             "Table", {tableCell[block]},
+            "Quote", {quoteCell[block["Text"]]},
             "Image", {imageCell[block]},
             "Code", If[executableQ[block], (counter += 1; exampleIOFor[block, counter]), withCellFlag[block, {Cell[block["Code"], "Program"]}]],
             _, {}
@@ -1269,8 +1379,9 @@ defaultNotebook[data_] := Block[{counter = 0, cells},
         block |-> Switch[block["Type"],
             "Heading", {Cell[block["Text"], Lookup[$headingStyleMap, block["Level"], "Subsubsection"]]},
             "Prose", {Cell[TextData @ inlineTextData[block["Text"]], "Text"]},
-            "List", Map[Cell[TextData @ inlineTextData[#], "Item"] &, block["Items"]],
+            "List", listItemCells[block, "Item"],
             "Table", {tableCell[block]},
+            "Quote", {quoteCell[block["Text"]]},
             "Image", {imageCell[block]},
             "Code",
                 If[ executableQ[block],
@@ -1417,9 +1528,13 @@ markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n
     mdOf[b_] := Switch[b["Type"],
         "Heading", StringRepeat["#", b["Level"]] <> " " <> b["Text"],
         "Prose", b["Text"],
-        "List", StringRiffle["- " <> # & /@ b["Items"], "\n"],
+        "List", If[ TrueQ[b["Ordered"]],
+            StringRiffle[MapIndexed[ToString[First[#2]] <> ". " <> #1 &, b["Items"]], "\n"],
+            StringRiffle["- " <> # & /@ b["Items"], "\n"]
+        ],
         "Table", serializeTableMd[b],
         "Separator", "---",
+        "Quote", "> " <> b["Text"],
         "Image", "![" <> Lookup[b, "Alt", ""] <> "](" <> Lookup[b, "Path", ""] <> ")",
         "Code", codeMd[b],
         _, ""
