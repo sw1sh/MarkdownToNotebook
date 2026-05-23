@@ -9,8 +9,10 @@ description: Author a Wolfram Language guide page (a paclet's documentation home
 `DocumentationBuild` turns into a `guide/` page) from a literate-markdown document
 with the `Guide` template. A guide page is a paclet's documentation home: an
 abstract plus a curated, annotated list of the paclet's functions. The worked
-example is `examples/AccessibleColors/docs/Guides/AccessibleColors.md`; model new
-guides on it and read `docs/doc-pages.md`.
+example is the AccessibleColors guide at
+https://github.com/sw1sh/AccessibleColors/blob/main/docs/Guides/AccessibleColors.md ;
+model new guides on it and read
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/doc-pages.md .
 
 ## Frontmatter
 
@@ -48,8 +50,10 @@ reference pages (the `wolfram-symbol-page` skill) carry the detail.
 ## Build
 
 ```
-Get["MarkdownToNotebook.wl"];
-MarkdownToNotebook["GuideName.md", "Documentation/English/Guides/GuideName.nb"]
+(* MarkdownToNotebook is not on the public Function Repository yet, so use
+   its public cloud deployment *)
+mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn["GuideName.md", "Documentation/English/Guides/GuideName.nb"]
 ```
 
 Then build the paclet docs with `DocumentationBuild`. The guide is usually the

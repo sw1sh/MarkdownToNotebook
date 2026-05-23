@@ -7,10 +7,12 @@ description: Author a Wolfram Paclet Repository paclet's definition notebook (Re
 
 A paclet's `ResourceDefinition.nb` is the Paclet Repository's deployable definition
 notebook. `MarkdownToNotebook` fills it from a literate-markdown document with the
-`Paclet` template. The worked example is
-`examples/AccessibleColors/ResourceDefinition.md`; model new paclets on it and read
-`docs/resource-notebooks.md` and `docs/resource-guidelines.md` for the slot mapping
-and Paclet Repository rules.
+`Paclet` template. The worked example is the AccessibleColors paclet definition at
+https://github.com/sw1sh/AccessibleColors/blob/main/ResourceDefinition.md ; model
+new paclets on it and read
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-notebooks.md
+and https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-guidelines.md
+for the slot mapping and Paclet Repository rules.
 
 A paclet is more than this one notebook: it also has documentation pages (guide,
 symbol reference pages, tech notes) and a `PacletInfo.wl`. Author the pages with the
@@ -39,7 +41,9 @@ Links: ["[label](https://example.com)"]
 ---
 ```
 
-Notes that bite (see `docs/subtleties.md`): `Name`/`Paclet` include the publisher
+Notes that bite (see
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/subtleties.md):
+`Name`/`Paclet` include the publisher
 ID (`Publisher/PacletName`); `MainGuide` is the **relative** notebook path, not a
 bare name; `Description` must match `PacletInfo.wl`'s `"Description"` exactly; each
 `Sources` entry is one citation (commas inside it are preserved). `Categories` fills
@@ -67,12 +71,16 @@ a documentation link.
 ## Build and deploy
 
 ```
-Get["MarkdownToNotebook.wl"];
-MarkdownToNotebook["ResourceDefinition.md", "ResourceDefinition.nb"]
+(* MarkdownToNotebook is not on the public Function Repository yet, so use
+   its public cloud deployment *)
+mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn["ResourceDefinition.md", "ResourceDefinition.nb"]
 ```
 
 Build the documentation pages with `DocumentationBuild` (the Symbol/Guide/TechNote
 notebooks the other skills produce). Deploy the paclet definition by scraping it
 into a `ResourceObject` and `CloudDeploy`-ing it (a headless `DeployResource`
-scrapes empty - see `docs/subtleties.md`); submit with `ResourceSubmit`. Run
+scrapes empty - see
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/subtleties.md); submit
+with `ResourceSubmit`. Run
 `DefinitionNotebookClient`CheckDefinitionNotebook[nbo]` and clear its hints first.

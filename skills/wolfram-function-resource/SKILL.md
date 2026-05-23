@@ -11,10 +11,12 @@ toolbar) from a literate-markdown document. The author writes YAML frontmatter a
 `## section` headings; the converter chooses every cell style. Use the
 `FunctionResource` template.
 
-The canonical worked example is `MarkdownToNotebook.md` itself (the converter is its
-own resource). Model new documents on it, and read `docs/resource-notebooks.md` and
-`docs/resource-guidelines.md` in this repo for the slot-by-slot mapping and the
-Function Repository style rules.
+The canonical worked example is the converter's own definition document,
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/MarkdownToNotebook.md (the
+converter is its own resource). Model new documents on it, and read
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-notebooks.md and
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-guidelines.md for
+the slot-by-slot mapping and the Function Repository style rules.
 
 ## Frontmatter
 
@@ -84,13 +86,16 @@ is `$...$`; `` [`Symbol`] `` (backticked, empty target) infers a documentation l
 
 ```
 (* convert markdown -> the definition notebook *)
-Get["MarkdownToNotebook.wl"];                 (* or use the deployed ResourceFunction *)
-MarkdownToNotebook["MyFunction.md", "MyFunction.nb"]
+(* MarkdownToNotebook is not on the public Function Repository yet, so use
+   its public cloud deployment *)
+mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn["MyFunction.md", "MyFunction.nb"]
 ```
 
 To deploy publicly, do **not** rely on a headless `DeployResource` (it scrapes an
 empty definition); scrape the notebook into a `ResourceObject` and `CloudDeploy` the
-resulting `ResourceFunction` - see `build.wls` and the deploy note in
-`docs/subtleties.md`. Submit to the repository with the docked Submit button or
-`ResourceSubmit`. Before submitting, run `DefinitionNotebookClient`CheckDefinitionNotebook[nbo]`
-and clear its hints (`docs/subtleties.md` documents the common ones and fixes).
+resulting `ResourceFunction` - see the deploy note in
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/subtleties.md . Submit to
+the repository with the docked Submit button or `ResourceSubmit`. Before submitting,
+run `DefinitionNotebookClient`CheckDefinitionNotebook[nbo]` and clear its hints
+(that doc lists the common ones and their fixes).

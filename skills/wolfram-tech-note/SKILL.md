@@ -9,8 +9,10 @@ description: Author a Wolfram Language tech note / tutorial (a free-flowing pros
 `DocumentationBuild` turns into a `tutorial/` page) from a literate-markdown document
 with the `TechNote` template. Unlike a symbol or guide page, a tech note has **no
 fixed sections** - it is free-flowing prose and code, like a tutorial. The worked
-example is `examples/AccessibleColors/docs/Tutorials/DesigningAccessibleColorSchemes.md`;
-model new tech notes on it and read `docs/doc-pages.md`.
+example is the AccessibleColors tutorial at
+https://github.com/sw1sh/AccessibleColors/blob/main/docs/Tutorials/DesigningAccessibleColorSchemes.md ;
+model new tech notes on it and read
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/doc-pages.md .
 
 ## Frontmatter
 
@@ -49,8 +51,10 @@ link to a symbol's reference page.
 ## Build
 
 ```
-Get["MarkdownToNotebook.wl"];
-MarkdownToNotebook["TechNoteName.md", "Documentation/English/Tutorials/TechNoteName.nb"]
+(* MarkdownToNotebook is not on the public Function Repository yet, so use
+   its public cloud deployment *)
+mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn["TechNoteName.md", "Documentation/English/Tutorials/TechNoteName.nb"]
 ```
 
 Then build the paclet docs with `DocumentationBuild`, and list the tech note under

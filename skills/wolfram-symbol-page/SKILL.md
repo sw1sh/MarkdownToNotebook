@@ -7,9 +7,11 @@ description: Author a Wolfram Language symbol reference page (a function/symbol 
 
 `MarkdownToNotebook` fills the DocumentationTools symbol authoring notebook (which
 `DocumentationBuild` turns into a `ref/` reference page) from a literate-markdown
-document with the `Symbol` template. The worked examples are
-`examples/AccessibleColors/docs/Symbols/*.md`; model new pages on them and read
-`docs/doc-pages.md` for the structure.
+document with the `Symbol` template. The worked examples are the symbol pages of
+the AccessibleColors paclet at
+https://github.com/sw1sh/AccessibleColors/tree/main/docs/Symbols ; model new pages
+on them and read https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/doc-pages.md
+for the structure.
 
 A symbol page documents one symbol and belongs to a paclet (author the paclet with
 the `wolfram-paclet` skill, the guide with `wolfram-guide-page`).
@@ -58,8 +60,10 @@ options (`eval`, `screenshot`, `tear`, `flag`) work as elsewhere; inline math is
 ## Build
 
 ```
-Get["MarkdownToNotebook.wl"];
-MarkdownToNotebook["SymbolName.md", "Documentation/English/ReferencePages/Symbols/SymbolName.nb"]
+(* MarkdownToNotebook is not on the public Function Repository yet, so use
+   its public cloud deployment *)
+mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn["SymbolName.md", "Documentation/English/ReferencePages/Symbols/SymbolName.nb"]
 ```
 
 Then build the paclet docs with `DocumentationBuild`. DocumentationBuild drops (with
