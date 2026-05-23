@@ -948,16 +948,26 @@ tableCellBox[text_String, opts___] := Cell[TextData @ inlineTextData[text], "Tab
 tableGridRow[cells_List, ncol_Integer, opts___] :=
     tableCellBox[#, opts] & /@ PadRight[cells, ncol, ""]
 
-tableCell[block_] := Block[{ncol = Length[block["Header"]], rows},
+(* a pipe table renders as a documentation table cell: the "<n>ColumnTable" cell
+   style (1/2/3 columns) carries the grid formatting the Documentation Tools palette
+   uses - Source Sans Pro, a top/bottom frame, row dividers, and the standard column
+   widths - so the author writes a plain markdown table and gets a native-looking
+   one. Wider tables fall back to a plain bordered grid. *)
+$columnTableStyle = <|1 -> "1ColumnTable", 2 -> "2ColumnTable", 3 -> "3ColumnTable"|>
+
+tableCell[block_] := Block[{ncol = Length[block["Header"]], rows, style},
     rows = Join[
         {tableGridRow[block["Header"], ncol, FontWeight -> Bold]},
         tableGridRow[#, ncol] & /@ block["Rows"]
     ];
-    Cell[BoxData[GridBox[rows,
-        GridBoxAlignment -> {"Columns" -> {{Left}}, "Rows" -> {{Baseline}}},
-        GridBoxDividers -> {"Columns" -> {{True}}, "Rows" -> {{True}}},
-        GridBoxItemSize -> {"Columns" -> {{Automatic}}, "Rows" -> {{Automatic}}}
-    ]], "Text"]
+    style = Lookup[$columnTableStyle, ncol, None];
+    If[ style =!= None,
+        Cell[BoxData[GridBox[rows]], style],
+        Cell[BoxData[GridBox[rows,
+            GridBoxAlignment -> {"Columns" -> {{Left}}, "Rows" -> {{Baseline}}},
+            GridBoxDividers -> {"Columns" -> {{True}}, "Rows" -> {{True}}}
+        ]], "Text"]
+    ]
 ]
 
 (* an inlined markdown image (![alt](path)) -> an image cell. A "papertear" effect
@@ -1401,16 +1411,18 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic), opts : OptionsPatt
     ctxPath = DeleteDuplicates @ Flatten @ {Lookup[meta, "Context", Nothing], Context[MarkdownToNotebook], "System`"};
     cached = AssociationMap[exampleCacheGet, hashes];
     allHit = hashes =!= {} && AllTrue[cached, ! MissingQ[#] &];
-    (* "Evaluate" -> False leaves the example cells unevaluated (input only).
-       Nested conversions (an example converting another document) are forced to
-       that, so a self-referential document - one whose example converts its own
-       source - cannot recurse without end. *)
+    (* "Evaluate" -> False leaves the example cells unevaluated (input only). An
+       example may itself convert another document (so its screenshot shows that
+       document's own evaluated cells), which is one level of nesting; beyond that a
+       hard depth cap stops a self-referential document - one whose example converts
+       its own source - from recursing without end (the self-referential example
+       passes "Evaluate" -> False to stop at the first level). *)
     outputs = Which[
-        ! evalExamples || $convertDepth > 1, <||>,
+        ! evalExamples || $convertDepth > 2, <||>,
         allHit, cached,
         True, evaluateAll[orderedCode, ctx, ctxPath]
     ];
-    If[ evalExamples && $convertDepth <= 1 && Not[allHit], KeyValueMap[exampleCacheSet, outputs] ];
+    If[ evalExamples && $convertDepth <= 2 && Not[allHit], KeyValueMap[exampleCacheSet, outputs] ];
 
     blocks = annotateOutputs[blocks, hashes, outputs];
     sections = sectionsFrom[blocks];
