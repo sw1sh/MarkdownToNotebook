@@ -93,24 +93,28 @@ If[ TrueQ[$CloudConnected],
     (* the deployed page is generated through the local front end; pin that session
        to light so the published page is not rendered in dark mode (the build front
        end resolves the Automatic appearance to Dark otherwise). *)
-    deployed = UsingFrontEnd @ Block[{nbo, res},
+    deployed = UsingFrontEnd @ Block[{nbo, ro, rf},
         CurrentValue[$FrontEnd, LightDark] = "Light";
         nbo = NotebookOpen[File[outNb]];
-        (* the headless front end does not assign CellIDs on open, so the resource
-           scraper cannot find the definition cell and deploys an empty function.
-           Turn on CreateCellID and save once to make the front end stamp every cell
-           with an ID (what happens automatically when a person edits the notebook),
-           so the scrape sees the definition. *)
+        (* the headless front end does not assign CellIDs on open, so the scraper
+           cannot find the definition cell. Turn on CreateCellID and save once to
+           make the front end stamp every cell with an ID (what happens when a
+           person edits the notebook), so the scrape sees the definition. *)
         CurrentValue[nbo, CreateCellID] = True;
         SelectionMove[nbo, All, Notebook];
         FrontEndTokenExecute[nbo, "Save"];
-        DefinitionNotebookClient`$ClickedButton = "Deploy";
-        DefinitionNotebookClient`$ClickedAction = "Publicly in the cloud";
-        res = DefinitionNotebookClient`DeployResource[nbo, "CloudPublic"];
+        (* DeployResource[nbo, ...] re-scrapes an *empty* definition headlessly (it
+           deploys a resource whose ResourceFunction[url][x] recurses / fails).
+           Scraping the notebook into a ResourceObject captures the full definition,
+           so build the ResourceFunction from that and CloudDeploy it publicly to the
+           stable URL - that round-trips: ResourceFunction[url] loads and runs it. *)
+        ro = ResourceObject[nbo];
+        rf = ResourceFunction[ro];
         NotebookClose[nbo];
-        res
+        CloudDeploy[rf, CloudObject["DeployedResources/Function/MarkdownToNotebook"], Permissions -> "Public"]
     ];
     print["  deployed: ", Replace[deployed, {
+        co_CloudObject :> First[co],
         ro_ResourceObject :> ro["DocumentationLink"],
         a_Association :> Lookup[a, "ResultLink", a]
     }] ]

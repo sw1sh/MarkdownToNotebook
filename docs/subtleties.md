@@ -413,14 +413,27 @@ FrontEndTokenExecute[nbo, "Save"];   (* now every cell has a CellID *)
 After this, headless `CheckDefinitionNotebook[nbo]` no longer reports
 `DefinitionMissing` and the deployed `ResourceFunction` actually runs.
 
-### Deploy with the docked button's own code, not a guessed overload
-The docked **Deploy > Publicly in the cloud** button (in
-`FunctionResourceDefinitionStyles.nb`) runs
-`$ClickedButton = "Deploy"; $ClickedAction = "Publicly in the cloud";
-DeployResource[notebook, "CloudPublic"]` - a **two**-argument
-`DeployResource[nbo, "CloudPublic"]`. The three-argument
-`DeployResource["Function", nbo, "CloudPublic"]` is a different overload that does
-not scrape the definition; it deploys an empty resource. Copy the button code.
+### Headless: `DeployResource` deploys an empty definition; capture then `CloudDeploy`
+The docked **Deploy > Publicly in the cloud** button runs
+`DeployResource[notebook, "CloudPublic"]` and works *interactively* (the front end
+has already stamped CellIDs as you edited). Run the same call **headless** and it
+scrapes an empty definition - `ResourceFunction[url][x]` then recurses / fails,
+and the uploaded `DefinitionData` is `Null` - even after forcing CellIDs. The
+notebook-to-`ResourceObject` scrape, by contrast, captures the full definition
+headlessly, so build the function from that and `CloudDeploy` it:
+
+```
+nbo = NotebookOpen[File[outNb]];
+CurrentValue[nbo, CreateCellID] = True;            (* see CellID note above *)
+SelectionMove[nbo, All, Notebook]; FrontEndTokenExecute[nbo, "Save"];
+ro = ResourceObject[nbo];                          (* captures the definition *)
+rf = ResourceFunction[ro];
+CloudDeploy[rf, CloudObject["DeployedResources/Function/<Name>"], Permissions -> "Public"]
+```
+
+This round-trips: `ResourceFunction[url]` then loads and runs the function.
+(`DeployResource["Function", nbo, "CloudPublic"]`, three arguments, is a different
+overload that also deploys nothing - do not use it.)
 
 ### Running the analysis and fixing content hints
 `DefinitionNotebookClient`CheckDefinitionNotebook[nbo]` runs the same inspections
