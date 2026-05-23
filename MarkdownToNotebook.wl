@@ -1421,9 +1421,12 @@ Options[MarkdownToNotebook] = {"Evaluate" -> True}
    matches both forms and, once the resource scraper reorders the down-values,
    forwards to itself without end (RecursionLimit). One definition with an optional
    spec avoids the ambiguity. *)
-MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, OptionsPattern[]] := Block[{
+MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts : OptionsPattern[]] := Block[{
     $convertDepth = $convertDepth + 1,
-    evalExamples = TrueQ[OptionValue[MarkdownToNotebook]],
+    (* resolve the "Evaluate" option directly - OptionValue[func, {opts}, name] in a
+       Block initializer mis-binds (it reads "func" as the option name and errors
+       OptionValue::optnf, leaving evalExamples False so nothing is ever evaluated). *)
+    evalExamples = TrueQ[Lookup[Flatten[{opts}], "Evaluate", True]],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cached, allHit, outputs, data, filled
 },
