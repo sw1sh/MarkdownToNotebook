@@ -7,7 +7,7 @@ ContributedBy: Nikolay Murzin, Claude (Anthropic)
 Keywords: [markdown, literate programming, function repository, notebook, documentation, templates]
 Categories: [Notebook Documents & Presentation]
 SeeAlso: [ResourceFunction, ResourceObject, CreateNotebook, DefineResourceFunction]
-Links: [[Wolfram/AccessibleColors - an example paclet authored entirely in markdown](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/AccessibleColors/), [Source on GitHub](https://github.com/sw1sh/MarkdownToNotebook), [YAML front matter - the frontmatter convention](https://jekyllrb.com/docs/front-matter/), [Quarto cell options - the #| option syntax](https://quarto.org/docs/computations/execution-options.html), [CommonMark - the base markdown spec](https://commonmark.org/)]
+Links: ["[Wolfram/AccessibleColors - an example paclet authored entirely in markdown](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/AccessibleColors/)", "[Source on GitHub](https://github.com/sw1sh/MarkdownToNotebook)", "[YAML front matter - the frontmatter convention](https://jekyllrb.com/docs/front-matter/)", "[Quarto cell options - the #| option syntax](https://quarto.org/docs/computations/execution-options.html)", "[CommonMark - the base markdown spec](https://commonmark.org/)"]
 EntrySymbol: MarkdownToNotebook
 ---
 

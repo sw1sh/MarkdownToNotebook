@@ -7,7 +7,7 @@ ContributedBy: MarkdownToNotebook
 Keywords: [quantum walk, Hadamard coin, ballistic transport, random walk, interference]
 Categories: [Quantum Computation, Visualization & Graphics]
 RelatedSymbols: [NestList, ArrayPlot, RandomWalkProcess, ListStepPlot]
-Links: [[Quantum walk (Wikipedia)](https://en.wikipedia.org/wiki/Quantum_walk)]
+Links: ["[Quantum walk (Wikipedia)](https://en.wikipedia.org/wiki/Quantum_walk)"]
 ---
 
 The discrete-time quantum walk is the quantum analogue of the classical random walk. A walker on the integer line carries a two-state *coin*; each step applies a Hadamard coin flip and then shifts the walker left or right conditioned on the coin state. Because the amplitudes interfere instead of adding as probabilities, the walk spreads *ballistically*: its standard deviation grows like $t$ rather than the classical $\sqrt{t}$, producing the characteristic two-horned distribution.

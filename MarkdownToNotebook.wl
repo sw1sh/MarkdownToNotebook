@@ -1371,8 +1371,19 @@ withCreateCellID[other_] := other
    follows each evaluated wl cell with an image of its output, saved under images/
    beside the target. The prose, headings, lists, tables and frontmatter are written
    back; only the outputs are added (as images a plain markdown viewer can show). *)
-fmLine[k_, v_String] := k <> ": " <> v
-fmLine[k_, v_List] := k <> ": [" <> StringRiffle[v, ", "] <> "]"
+(* quote a YAML value when it would otherwise break parsing: brackets / braces /
+   commas open a flow collection, ": " or " #" end a scalar, and a leading
+   indicator char reads as a node tag. A markdown link "[label](url)" in a [list]
+   hits the bracket case, so the source's quotes (which the YAML parser strips on
+   the way in) must be restored on the way out, or GitHub rejects the frontmatter. *)
+yamlNeedsQuote[s_String] := StringContainsQ[s, "[" | "]" | "{" | "}" | "," | ": " | " #" | "\""] ||
+    StringStartsQ[s, "[" | "{" | "&" | "*" | "!" | "|" | ">" | "@" | "`" | "%" | "'" | "\"" | "#"] ||
+    s =!= StringTrim[s]
+yamlValue[s_String] := If[yamlNeedsQuote[s], "\"" <> StringReplace[s, {"\\" -> "\\\\", "\"" -> "\\\""}] <> "\"", s]
+yamlValue[x_] := ToString[x]
+
+fmLine[k_, v_String] := k <> ": " <> yamlValue[v]
+fmLine[k_, v_List] := k <> ": [" <> StringRiffle[yamlValue /@ v, ", "] <> "]"
 fmLine[k_, v_] := k <> ": " <> ToString[v]
 
 serializeFrontmatter[meta_] := If[meta === <||> || meta === Null, "",

@@ -7,7 +7,7 @@ ContributedBy: MarkdownToNotebook
 Keywords: [primes, spiral, polar coordinates, visualization]
 Categories: [Visualization & Graphics, Puzzles and Recreation]
 RelatedSymbols: [Prime, ListPlot]
-Links: [[Prime spirals](https://en.wikipedia.org/wiki/Ulam_spiral)]
+Links: ["[Prime spirals](https://en.wikipedia.org/wiki/Ulam_spiral)"]
 ---
 
 ## Content
