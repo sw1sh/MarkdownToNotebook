@@ -7,7 +7,7 @@ ContributedBy: Nikolay Murzin, Claude (Anthropic)
 Keywords: [markdown, literate programming, function repository, notebook, documentation, templates]
 Categories: [Notebook Documents & Presentation]
 SeeAlso: [ResourceFunction, ResourceObject, CreateNotebook, DefineResourceFunction]
-Links: [[Wolfram/AccessibleColors - an example paclet authored entirely in markdown](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/AccessibleColors/)]
+Links: [[Wolfram/AccessibleColors - an example paclet authored entirely in markdown](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/AccessibleColors/), [Source on GitHub](https://github.com/sw1sh/MarkdownToNotebook), [YAML front matter - the frontmatter convention](https://jekyllrb.com/docs/front-matter/), [Quarto cell options - the #| option syntax](https://quarto.org/docs/computations/execution-options.html), [CommonMark - the base markdown spec](https://commonmark.org/)]
 EntrySymbol: MarkdownToNotebook
 ---
 
@@ -26,15 +26,29 @@ The implementation lives in a separate `.wl` file so it has full IDE and lint su
 - The *source* is a local file path, an `http(s)` URL, or a raw markdown string.
 - The layout is the document's own `Template` frontmatter key - `FunctionResource`, `Symbol`, `Guide`, `TechNote`, `Paclet`, or `Default` - so the source declares its own layout.
 - `FunctionResource` fills the official `FunctionResourceDefinition.nb` template (keeping its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates; `Default` maps headings and code to standard notebook styles.
-- The frontmatter keys mirror each template's metadata, so the author never writes cell styles.
+- The *frontmatter* is a YAML-style `key: value` header fenced by `---` lines at the very top of the document - the [front matter](https://jekyllrb.com/docs/front-matter/) convention static-site generators use - carrying the resource metadata. Its keys mirror the chosen template's slots (`Name`, `Description`, `Keywords`, `Categories`, `ContributedBy`, `SeeAlso`, `Links`, ...), so the author fills metadata, never cell styles.
 - The optional second argument selects the result: omitted (or `"Notebook"`) returns the [`Notebook`], `"Association"` returns the parsed structure, a `.nb` file name writes the notebook, and a `.md` file name writes a *markdown twin* - the same document with every evaluated output rasterized to an image beside it.
-- The one option, `"Evaluate"`, defaults to `True`; `"Evaluate" -> False` leaves the example cells unevaluated (input only), which a self-referential document uses to convert its own source without re-running its own examples.
+- The function takes one option:
+
+| Option | Default |  |
+|---|---|---|
+| `"Evaluate"` | `True` | evaluate the example cells and keep their output; `False` leaves them as input only, which a self-referential document passes to convert its own source without re-running its own examples |
+
 - A `Flag` frontmatter key flags the whole document and a code cell's `#| flag:` option flags that cell, with one of the documentation build's flags - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` - the front end's Futurize / Excise toolbar buttons, written as the build's banner cell.
-- Individual code cells carry `#|` options instead - `eval`, `file`, `screenshot`, `tear`, `flag` - documented under Scope.
 - Evaluated example outputs are cached as a [`PersistentSymbol`] per cell at the `"Local"` [`PersistenceLocation`], keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
 - Manage that cache the standard way: [`PersistentObjects`]["MarkdownToNotebook/ExampleOutput/*", "Local"] lists it, [`DeleteObject`] clears it, and [`$PersistencePath`] / [`PersistenceLocation`] relocate it.
 - The source lives on GitHub, which renders the markdown directly: [github.com/sw1sh/MarkdownToNotebook](https://github.com/sw1sh/MarkdownToNotebook).
 - Running the function on this document - [`Get`] the `.wl`, then `MarkdownToNotebook["MarkdownToNotebook.md", "MarkdownToNotebook.nb"]` - reproduces this very definition notebook; that is the loop `build.wls` runs.
+
+Individual code cells carry their own options as `#|` comment lines at the top of the cell - the [Quarto](https://quarto.org/docs/computations/execution-options.html) cell-option convention - one `key: value` per line:
+
+| Option | Effect |
+|---|---|
+| `eval` | evaluate the cell and keep its output (the default); `eval: false` shows the code without running it |
+| `file` | replace the cell body with the contents of a local file or URL |
+| `screenshot` | rasterize a produced notebook to an inline image |
+| `tear` | render the output as a torn-paper screenshot; a number sets the visible height in points |
+| `flag` | mark the cell with a build flag - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` |
 
 ## Usage
 
@@ -158,9 +172,9 @@ Export[FileNameJoin[{$TemporaryDirectory, "snippet.wl"}], "Range[5]^2", "Text"];
 
 ### Inlining an image
 
-A markdown image `![alt](path)` inlines an image - a local file or URL, resolved relative to the source:
+A markdown image `![alt](path)` inlines an image - a local file or URL, resolved relative to the source (this is the function's headline image, markdown in and a notebook out):
 
-![A built guide page](docs/images/guide-page.png)
+![MarkdownToNotebook: markdown in, a notebook out](docs/images/headline.png)
 
 A `"papertear"` title - `![alt](path "papertear")` - additionally applies the front end's Convert To > Paper Tear cell effect for a torn-screenshot look (the same effect a code cell's `#| tear:` option gives its output, used under Applications below).
 
@@ -194,6 +208,30 @@ Cases[MarkdownToNotebook["---\nFlag: Future\n---\n# Demo\n\ntext"], Cell[_, styl
 
 ![output](images/MarkdownToNotebook-out-13.png)
 
+## Options
+
+### Evaluate
+
+By default every `wl` example cell is evaluated and its output kept. With the default, the converted notebook carries the evaluated output:
+
+```wl
+#| screenshot: True
+MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
+```
+
+![output](images/MarkdownToNotebook-out-14.png)
+
+---
+
+`"Evaluate" -> False` builds the notebook from the same source but leaves the example cells unevaluated - the input stays, the output is dropped. A self-referential document (one whose example converts its own source) passes it so converting itself does not re-run its own examples without end:
+
+```wl
+#| screenshot: True
+MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", "Evaluate" -> False]
+```
+
+![output](images/MarkdownToNotebook-out-15.png)
+
 ## Applications
 
 Generate a paclet's entire documentation set, the guide page, the symbol reference pages, and a publishable Function Repository definition, from plain markdown, so authors never edit notebook cell styles by hand. The published [Wolfram/AccessibleColors](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/AccessibleColors/) paclet is built this way end to end. Here its guide page is converted straight from the markdown on [GitHub](https://github.com/sw1sh/AccessibleColors); the `#| screenshot: true` cell option rasterizes the produced notebook and `#| tear: 150` gives it a torn-paper screenshot look, keeping the top 150 points of output visible above the tear:
@@ -204,7 +242,7 @@ Generate a paclet's entire documentation set, the guide page, the symbol referen
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/main/docs/Guides/AccessibleColors.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-14.png)
+![output](images/MarkdownToNotebook-out-16.png)
 
 ## Properties and Relations
 
@@ -214,7 +252,7 @@ The Wolfram Language already reads markdown into a plain notebook - [`Import`]["
 ImportString["# Title\n\nText with inline math $\\sin x$.", {"Markdown", "Notebook"}]
 ```
 
-![output](images/MarkdownToNotebook-out-15.png)
+![output](images/MarkdownToNotebook-out-17.png)
 
 `FunctionResource` then fills the same template [`CreateNotebook`]["FunctionResource"] opens (publishable with [`ResourceSubmit`]), and `Symbol`/`Guide` fill the DocumentationTools templates `DocumentationBuild` turns into reference pages.
 
@@ -226,7 +264,7 @@ A string that is neither a URL nor an existing file is treated as raw markdown, 
 MarkdownToNotebook["nonexistent.md", "Association"]["Sections"]
 ```
 
-![output](images/MarkdownToNotebook-out-16.png)
+![output](images/MarkdownToNotebook-out-18.png)
 
 ## Neat Examples
 
@@ -236,6 +274,6 @@ The neatest example is this very document: running the function on its own GitHu
 NotebookPut[MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/MarkdownToNotebook.md", "Evaluate" -> False]]
 ```
 
-![output](images/MarkdownToNotebook-out-17.png)
+![output](images/MarkdownToNotebook-out-19.png)
 
 Because this very document is itself such a literate source - its `## Definition` inlines `MarkdownToNotebook.wl` and its frontmatter is the resource metadata - running the function on it reproduces this definition notebook, so the function publishes itself.

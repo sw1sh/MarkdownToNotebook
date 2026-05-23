@@ -536,9 +536,12 @@ applyDocFlag[Notebook[cells_, o___], v_String] := With[{f = flagCell[v]},
     If[f === Nothing, Notebook[cells, o], Notebook[Prepend[cells, f], o]]]
 applyDocFlag[nb_, _] := nb
 
+(* the filled function-definition cell. It must carry the "DefaultContent" cell
+   tag the official template puts on every content cell, or the resource scraper
+   (and the submission Check) does not recognize it as the function's definition. *)
 functionSlot[opts_, defCode_String] := If[ defCode === "",
     slotDefault[opts],
-    {Cell[BoxData[defCode], "Code", CellTags -> {"Function"}, InitializationCell -> True]}
+    {Cell[BoxData[defCode], "Code", CellTags -> {"DefaultContent"}, InitializationCell -> True]}
 ]
 
 (* a Usage section is a sequence of usage statements, one per prose paragraph
@@ -948,31 +951,27 @@ tableCellBox[text_String, opts___] := Cell[TextData @ inlineTextData[text], "Tab
 tableGridRow[cells_List, ncol_Integer, opts___] :=
     tableCellBox[#, opts] & /@ PadRight[cells, ncol, ""]
 
-(* a pipe table renders as a documentation table cell: the "<n>ColumnTable" cell
-   style (1/2/3 columns) carries the grid formatting the Documentation Tools palette
-   uses - Source Sans Pro, a top/bottom frame, row dividers, and the standard column
-   widths - so the author writes a plain markdown table and gets a native-looking
-   one. Wider tables fall back to a plain bordered grid. *)
-$columnTableStyle = <|1 -> "1ColumnTable", 2 -> "2ColumnTable", 3 -> "3ColumnTable"|>
-
-tableCell[block_] := Block[{ncol = Length[block["Header"]], rows, style},
+(* a pipe table renders as a "TableNotes" cell - the table style the Function
+   Repository definition notebook's docked cell inserts (a Notes-derived grid with
+   left-aligned columns and horizontal row dividers, no per-column widths, so it
+   takes any number of columns). The grid options are repeated inline so the table
+   still reads correctly under stylesheets that do not define "TableNotes". *)
+tableCell[block_] := Block[{ncol = Length[block["Header"]], rows},
     rows = Join[
         {tableGridRow[block["Header"], ncol, FontWeight -> Bold]},
         tableGridRow[#, ncol] & /@ block["Rows"]
     ];
-    style = Lookup[$columnTableStyle, ncol, None];
-    If[ style =!= None,
-        Cell[BoxData[GridBox[rows]], style],
-        Cell[BoxData[GridBox[rows,
-            GridBoxAlignment -> {"Columns" -> {{Left}}, "Rows" -> {{Baseline}}},
-            GridBoxDividers -> {"Columns" -> {{True}}, "Rows" -> {{True}}}
-        ]], "Text"]
-    ]
+    Cell[BoxData[GridBox[rows,
+        GridBoxAlignment -> {"Columns" -> {{Left}}, "Rows" -> {{Baseline}}},
+        GridBoxDividers -> {"Columns" -> {{None}}, "Rows" -> {{True}}}
+    ]], "TableNotes"]
 ]
 
-(* an inlined markdown image (![alt](path)) -> an image cell. A "papertear" effect
-   applies the front end's Paper Tear background to the cell. *)
-imageCell[block_] := Cell[BoxData[ToBoxes @ block["Image"]], "Text",
+(* an inlined markdown image (![alt](path)) -> an "Output" image cell. (A "Text"
+   style cell does not render its embedded graphic on the deployed cloud page; an
+   "Output" cell - the same style the evaluated example images use - does.) A
+   "papertear" title applies the front end's Paper Tear background to the cell. *)
+imageCell[block_] := Cell[BoxData[ToBoxes @ block["Image"]], "Output",
     Sequence @@ If[ToLowerCase[Lookup[block, "Effect", ""]] === "papertear", {BackgroundAppearance -> "PaperTear"}, {}]]
 
 docExampleCells[sections_] := Block[{cells = sectionCells[sections, "basic examples"], counter = 0},

@@ -80,8 +80,12 @@ print["  warm run:    ", warmTime, " s (", Length @ PersistentObjects["MarkdownT
 outNb = MarkdownToNotebook[src, FileNameJoin[{dir, "MarkdownToNotebook.nb"}]]
 print["  wrote:       ", FileNameTake[outNb], " (", Head @ Quiet @ Get[outNb], ")"]
 
-(* phase 5: deploy the resource function publicly to the cloud (the docked
-   Deploy > "Publicly in the cloud" action = DeployResource[..., "CloudPublic"]). *)
+(* phase 5: deploy the resource function publicly to the cloud, running exactly the
+   docked "Deploy > Publicly in the cloud" button's own code (from
+   FunctionResourceDefinitionStyles.nb): set the two button-state globals, then
+   DeployResource[notebook, "CloudPublic"]. The earlier 3-argument
+   DeployResource["Function", nbo, ...] form is a different overload that did not
+   scrape the function definition, so the deployed resource came back empty. *)
 print["build: deploying the resource function publicly to the cloud"]
 Needs["DefinitionNotebookClient`"]
 If[ Not[TrueQ[$CloudConnected]], Quiet @ CloudConnect[] ]
@@ -92,7 +96,9 @@ If[ TrueQ[$CloudConnected],
     deployed = UsingFrontEnd @ Block[{nbo, res},
         CurrentValue[$FrontEnd, LightDark] = "Light";
         nbo = NotebookOpen[File[outNb]];
-        res = DefinitionNotebookClient`DeployResource["Function", nbo, "CloudPublic"];
+        DefinitionNotebookClient`$ClickedButton = "Deploy";
+        DefinitionNotebookClient`$ClickedAction = "Publicly in the cloud";
+        res = DefinitionNotebookClient`DeployResource[nbo, "CloudPublic"];
         NotebookClose[nbo];
         res
     ];
