@@ -56,7 +56,9 @@ Individual code cells carry their own options as `#|` comment lines at the top o
 
 `MarkdownToNotebook[source, "Association"]` returns the parsed structure as an [`Association`] instead of the notebook.
 
-`MarkdownToNotebook[source, file]` writes the notebook to *file* and returns the file; a `.md` *file* instead writes a markdown twin of the document with each evaluated output rasterized beside it.
+`MarkdownToNotebook[source, "file.nb"]` writes the notebook to the `.nb` *file* and returns the file.
+
+`MarkdownToNotebook[source, "file.md"]` writes a markdown twin of the document, with each evaluated output rasterized to an image beside it, and returns the file.
 
 ## Basic Examples
 
@@ -128,7 +130,13 @@ MarkdownToNotebook["Inline `Range[3]`, *emphasis*, ``verbatim``, and the math $\
 
 ### Links
 
-`[label](url)` is a prose hyperlink; a backticked label with no target - `` [`Symbol`] `` or `` [`Symbol`]() `` - infers a documentation reference; `` [`Symbol`](url) `` links explicitly:
+Three link forms are supported:
+
+- `[label](url)` makes a prose hyperlink.
+- `` [`Symbol`] `` infers a documentation reference (a backticked label with no target).
+- `` [`Symbol`](url) `` makes a code-styled explicit link.
+
+For example:
 
 ```wl
 #| screenshot: True
@@ -180,7 +188,7 @@ The title defaults to `Output`; the special title `"papertear"` keeps `Output` a
 
 ### Returning a notebook, an association, or a file
 
-Omitted (or `"Notebook"`) returns the [`Notebook`]; `"Association"` returns the parsed structure for inspection; a `.nb` file name writes the notebook and returns it. The whole association exposes the notebook, the metadata, the section list, and the chosen template:
+Omitted (or `"Notebook"`) returns the [`Notebook`]; `"Association"` returns the parsed structure for inspection; any other string writes the notebook to that file and returns it. The whole association exposes the notebook, the metadata, the section list, and the chosen template:
 
 ```wl
 MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Association"]
@@ -190,7 +198,7 @@ MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Ass
 
 ### Writing a markdown twin
 
-A `.md` file name writes a GitHub-renderable *twin* of the document - the same prose and code, but with each evaluated output rasterized to a PNG beside it (under an `images/` folder next to the target). This very repository's [`MarkdownToNotebook-out.md`](MarkdownToNotebook-out.md) is the twin of this document, produced this way. Here a small literate doc is converted to a twin and the resulting markdown read back, showing the output image spliced in after its code cell:
+Targeting a markdown file writes a GitHub-renderable *twin* of the document - the same prose and code, but with each evaluated output rasterized to a PNG beside it (under an `images/` folder next to the target). [`MarkdownToNotebook-out.md`](MarkdownToNotebook-out.md) in this repository is exactly that twin, produced this way. Here a small literate doc is converted to a twin and the resulting markdown read back, showing the output image spliced in after its code cell:
 
 ```wl
 Module[{dir = CreateDirectory[]}, MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", FileNameJoin[{dir, "twin.md"}]]; Import[FileNameJoin[{dir, "twin.md"}], "Text"]]
