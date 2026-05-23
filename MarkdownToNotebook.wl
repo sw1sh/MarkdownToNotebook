@@ -1459,7 +1459,13 @@ Options[MarkdownToNotebook] = {"Evaluate" -> True}
    forwards to itself without end (RecursionLimit). One definition with an optional
    spec avoids the ambiguity. *)
 MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts : OptionsPattern[]] := Block[{
-    $convertDepth = $convertDepth + 1,
+    (* Start the nesting counter self-contained: read $convertDepth only when it is
+       already an integer, else treat it as 0. The load-time `$convertDepth = 0`
+       (above) sets it in a Get-ed session, but a deployed ResourceFunction runs in a
+       fresh kernel where that init may not have executed - and `$convertDepth + 1`
+       on an *unbound* symbol binds the local to the symbolic `$convertDepth + 1`,
+       which re-expands without end (RecursionLimit on every call). *)
+    $convertDepth = If[IntegerQ[$convertDepth], $convertDepth, 0] + 1,
     (* resolve the "Evaluate" option directly - OptionValue[func, {opts}, name] in a
        Block initializer mis-binds (it reads "func" as the option name and errors
        OptionValue::optnf, leaving evalExamples False so nothing is ever evaluated). *)
