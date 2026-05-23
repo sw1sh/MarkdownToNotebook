@@ -121,7 +121,7 @@ GitHub read as a *closing* fence; a mid-line ` ``` ` inside a string literal is
 safe because fence detection only triggers at the start of a line.
 
 ### "Paper Tear" is a cell option, not an image effect
-The front end's Convert To ▸ Paper Tear menu item runs `FE`PaperTearToggle[]`,
+The front end's Convert To > Paper Tear menu item runs `FE`PaperTearToggle[]`,
 which just sets the cell option `BackgroundAppearance -> "PaperTear"` (read the
 menu code in `…/SystemFiles/FrontEnd/TextResources/ContextMenus.tr` and
 `GetFEKernelInit.tr`). It is **not** `ImageEffect[…, "TornFrame"]` (a different,
@@ -389,13 +389,53 @@ renders as a blank line. Drop it - but match it by *content emptiness*
 `Cell[BoxData[], …]`: the template's `BoxData` is a context-shadowed symbol, so
 the bare pattern silently misses it.
 
-### `DefinitionMissing` can be a headless artifact (FunctionResource)
-A definition that inlines a whole multi-symbol package can report
-`DefinitionMissing` under headless `CheckDefinitionNotebook[File[…]]` while being
-perfectly valid: reproducing the scraper's own steps - `evaluateCell` in
-`FunctionResource`$ResourceFunctionTempContext` then `minimalDefinition` - yields
-a non-empty `Language`DefinitionList`. The interactive Deploy/Submit path (what
-`build.wls` uses) builds it cleanly.
+### `DefinitionMissing` headless = no CellIDs = an empty deployed resource
+This is real, not an artifact. The resource scraper finds the definition (and
+example) cells through `EvaluatableCells[nbo]`, which it matches **by `CellID`**.
+A generated notebook expression has no `CellID`s, and the *headless* front end
+does not assign them on `NotebookOpen` (the interactive front end does, the moment
+you click into a cell - which is why deploying by hand from the desktop works).
+So a headless `DeployResource` scrapes nothing, reports `DefinitionMissing`, and
+deploys an **empty** resource whose `ResourceFunction[...][x]` comes back
+unevaluated / `$Failed` with `DefinitionData` of length 0.
+
+Fix: make the front end stamp the CellIDs before the scrape. Set
+`CreateCellID -> True` on the notebook (the converter does this) and, in the
+deploy, force one assignment pass:
+
+```
+nbo = NotebookOpen[File[outNb]];
+CurrentValue[nbo, CreateCellID] = True;
+SelectionMove[nbo, All, Notebook];
+FrontEndTokenExecute[nbo, "Save"];   (* now every cell has a CellID *)
+```
+
+After this, headless `CheckDefinitionNotebook[nbo]` no longer reports
+`DefinitionMissing` and the deployed `ResourceFunction` actually runs.
+
+### Deploy with the docked button's own code, not a guessed overload
+The docked **Deploy > Publicly in the cloud** button (in
+`FunctionResourceDefinitionStyles.nb`) runs
+`$ClickedButton = "Deploy"; $ClickedAction = "Publicly in the cloud";
+DeployResource[notebook, "CloudPublic"]` - a **two**-argument
+`DeployResource[nbo, "CloudPublic"]`. The three-argument
+`DeployResource["Function", nbo, "CloudPublic"]` is a different overload that does
+not scrape the definition; it deploys an empty resource. Copy the button code.
+
+### Running the analysis and fixing content hints
+`DefinitionNotebookClient`CheckDefinitionNotebook[nbo]` runs the same inspections
+the Submit button does and returns a `Dataset` (rows of `Level` / `Tag` /
+`Parameters` / `CellID`). This is the hint-correction workflow: deploy/submit runs
+it automatically, so run it yourself first and clear the rows. Once CellIDs are
+assigned (above) the content hints appear instead of `DefinitionMissing`:
+
+| Tag | Fix (in the converter unless noted) |
+|---|---|
+| `ThreeDotEllipsis` | a literal `...` should be the `\[Ellipsis]` character; the prose pass rewrites `...` to `…`, but `...` inside an inline-code/`$...$` span must be reworded in the source |
+| `ExtraWhitespace` | trim padding spaces - CommonMark keeps the spaces inside a `` `` `x` `` `` verbatim span, so `StringTrim` the span content |
+| `FoundUnformattedCode` | a bare System-symbol word in prose (e.g. `Function`) reads as code; make it a hyperlink or reword |
+| `LargeCellBounds/CellArea` | a cell (a full-notebook thumbnail) is too tall; cap it with a `CellSize` (the `#| tear:` option) or render it smaller |
+| `InputExampleImage` | an example *input* cell rendered as an image; keep example inputs as real input boxes |
 
 ## Environment
 

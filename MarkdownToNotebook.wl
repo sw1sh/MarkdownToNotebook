@@ -321,8 +321,13 @@ resultNotebook[res_] := Append[If[Head[res] === NotebookObject, NotebookGet[res]
 outputBoxes[res_, opts_] := Which[
     res === Null, Null,
     Head[res] === NotebookObject,
-        With[{img = Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 144]},
-            Quiet @ NotebookClose[res]; ToBoxes[img]],
+        (* a whole-notebook thumbnail can be enormous; rasterize at a lower
+           resolution and cap the height so the cell does not trip the analysis
+           "huge raster" / "large screen area" checks, while still showing the
+           entire notebook. *)
+        With[{img = Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 96]},
+            Quiet @ NotebookClose[res];
+            ToBoxes @ If[ImageQ[img] && Last[ImageDimensions[img]] > 1400, ImageResize[img, {Automatic, 1400}], img]],
     TrueQ[Lookup[opts, "screenshot", False]] && Head[res] === Notebook,
         ToBoxes @ Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 144],
     True, ToBoxes[res]
@@ -861,7 +866,10 @@ codeToInline[code_String] := Cell[BoxData[inputBoxes[code]], "InlineFormula"]
 
 (* double-backtick ``code`` -> the palette's "Code (Inline)": a literal,
    non-linkified monospace span (InlineCode), unlike Template Input. *)
-literalCodeInline[code_String] := Cell[BoxData[StyleBox[code, "InlineCode"]], "InlineCode"]
+(* a double-backtick verbatim span. CommonMark keeps the spaces just inside the
+   backticks (`` `x` `` -> " `x` "), but those padding spaces trip the notebook
+   analysis "extra whitespace" check, so trim them. *)
+literalCodeInline[code_String] := Cell[BoxData[StyleBox[StringTrim[code], "InlineCode"]], "InlineCode"]
 
 (* $math$ -> inline math. The content is TeX (LaTeX math notation): ImportString
    parses "$...$" into typeset boxes (SqrtBox, FractionBox, ...). Fall back to a
@@ -924,16 +932,22 @@ linkInferred[name_String] := Block[{url = inferURL[name]},
     ]
 ]
 
-inlineTextData[text_String] := StringSplit[text, {
-    "[" ~~ t : Shortest[Except["]"] ..] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> linkInline[t, u],
-    "[`" ~~ t : Shortest[Except["`"] ..] ~~ "`]" :> linkInferred[t],
-    "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
-    "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
-    "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
-    (* *word* -> an italic argument reference: a bare StyleBox in the TextData,
-       the form usage descriptions use (StyleBox[arg, "TI"]), not a formula cell *)
-    Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> StyleBox[i, "TI"]
-}]
+inlineTextData[text_String] := Replace[
+    StringSplit[text, {
+        "[" ~~ t : Shortest[Except["]"] ..] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> linkInline[t, u],
+        "[`" ~~ t : Shortest[Except["`"] ..] ~~ "`]" :> linkInferred[t],
+        "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
+        "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
+        "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
+        (* *word* -> an italic argument reference: a bare StyleBox in the TextData,
+           the form usage descriptions use (StyleBox[arg, "TI"]), not a formula cell *)
+        Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> StyleBox[i, "TI"]
+    }],
+    (* a literal "..." in prose should be the single ellipsis character (the
+       notebook analysis flags three dots); only the plain-text runs are touched. *)
+    s_String :> StringReplace[s, "..." -> "\[Ellipsis]"],
+    {1}
+]
 
 (* a Symbol page's "## Usage" prose, rendered as one Usage cell with its inline
    formatting. Symbols are linked only where the author wrote an explicit
@@ -967,12 +981,22 @@ tableCell[block_] := Block[{ncol = Length[block["Header"]], rows},
     ]], "TableNotes"]
 ]
 
-(* an inlined markdown image (![alt](path)) -> an "Output" image cell. (A "Text"
-   style cell does not render its embedded graphic on the deployed cloud page; an
-   "Output" cell - the same style the evaluated example images use - does.) A
-   "papertear" title applies the front end's Paper Tear background to the cell. *)
-imageCell[block_] := Cell[BoxData[ToBoxes @ block["Image"]], "Output",
-    Sequence @@ If[ToLowerCase[Lookup[block, "Effect", ""]] === "papertear", {BackgroundAppearance -> "PaperTear"}, {}]]
+(* an inlined markdown image (![alt](path "title")) -> an image cell. The title is
+   a *raw cell style* override (a "Text" style cell will not render its graphic on
+   the deployed cloud page, so the default is "Output", the style the evaluated
+   example images use); a documentation image wants "ExampleImage". The special
+   title "papertear" keeps the "Output" style and adds the front end's Paper Tear
+   background. *)
+imageCell[block_] := With[{title = StringTrim @ Lookup[block, "Effect", ""]},
+    Which[
+        ToLowerCase[title] === "papertear",
+            Cell[BoxData[ToBoxes @ block["Image"]], "Output", BackgroundAppearance -> "PaperTear"],
+        title =!= "",
+            Cell[BoxData[ToBoxes @ block["Image"]], title],
+        True,
+            Cell[BoxData[ToBoxes @ block["Image"]], "Output"]
+    ]
+]
 
 docExampleCells[sections_] := Block[{cells = sectionCells[sections, "basic examples"], counter = 0},
     Catenate @ Map[
@@ -1305,6 +1329,17 @@ buildNotebook["Guide", data_] := guideNotebook[data]
 buildNotebook["TechNote", data_] := tutorialNotebook[data]
 buildNotebook[_, data_] := defaultNotebook[data]
 
+(* Every cell needs a CellID for the resource scraper to locate the definition and
+   example cells. The interactive front end assigns them when a notebook is opened,
+   but a notebook deployed headlessly (build.wls, never opened by hand) keeps
+   whatever the expression carries - and without CellIDs the scraper reports the
+   function definition as missing and deploys an empty resource. Setting the
+   notebook's CreateCellID option makes the front end assign the missing CellIDs as
+   soon as it opens the notebook, the idiomatic equivalent of clicking into it. *)
+withCreateCellID[Notebook[cells_, o : OptionsPattern[]]] :=
+    Notebook[cells, CreateCellID -> True, Sequence @@ FilterRules[{o}, Except[CreateCellID]]]
+withCreateCellID[other_] := other
+
 (* === markdown-out: a rendered markdown twin ===
    MarkdownToNotebook[source, "out.md"] re-serializes the document to markdown but
    follows each evaluated wl cell with an image of its output, saved under images/
@@ -1380,11 +1415,15 @@ exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheL
    string is a notebook file path.) The layout comes from the Template frontmatter. *)
 Options[MarkdownToNotebook] = {"Evaluate" -> True}
 
-MarkdownToNotebook[file_String, opts : OptionsPattern[]] := MarkdownToNotebook[file, Automatic, opts]
-
-MarkdownToNotebook[file_String, spec : (_String | Automatic), opts : OptionsPattern[]] := Block[{
+(* spec is an *optional* second argument (default Automatic). Do not split this
+   into a separate 1-argument form that forwards to the 3-argument one: an empty
+   OptionsPattern[] also matches Automatic, so MarkdownToNotebook[file, Automatic]
+   matches both forms and, once the resource scraper reorders the down-values,
+   forwards to itself without end (RecursionLimit). One definition with an optional
+   spec avoids the ambiguity. *)
+MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, OptionsPattern[]] := Block[{
     $convertDepth = $convertDepth + 1,
-    evalExamples = TrueQ[OptionValue[MarkdownToNotebook, {opts}, "Evaluate"]],
+    evalExamples = TrueQ[OptionValue[MarkdownToNotebook]],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cached, allHit, outputs, data, filled
 },
@@ -1427,7 +1466,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic), opts : OptionsPatt
     sections = sectionsFrom[blocks];
     defCode = StringRiffle[#["Code"] & /@ sectionCells[sections, "definition"], "\n\n"];
     data = <|"meta" -> meta, "blocks" -> blocks, "sections" -> sections, "defCode" -> defCode|>;
-    filled = applyDocFlag[buildNotebook[tmplName, data], Lookup[meta, "Flag", ""]];
+    filled = withCreateCellID @ applyDocFlag[buildNotebook[tmplName, data], Lookup[meta, "Flag", ""]];
 
     Which[
         spec === Automatic || spec === "Notebook", filled,

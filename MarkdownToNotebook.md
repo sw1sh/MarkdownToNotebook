@@ -12,7 +12,7 @@ EntrySymbol: MarkdownToNotebook
 ---
 
 This document is the source of truth for the resource function it describes.
-The frontmatter above is the Function Repository metadata; the Definition
+The frontmatter above is the [Function Repository](https://resources.wolframcloud.com/FunctionRepository/) metadata; the Definition
 section below inlines the implementation from a local `.wl` file; and the
 example cells are evaluated (with caching) to build the resource's
 documentation. Running the function on this very file reproduces its own
@@ -64,7 +64,9 @@ Individual code cells carry their own options as `#|` comment lines at the top o
 
 `MarkdownToNotebook[source, "Association"]` returns the parsed structure as an [`Association`] instead of the notebook.
 
-`MarkdownToNotebook[source, file]` writes the notebook to *file* and returns the file; a `.md` *file* instead writes a markdown twin of the document with each evaluated output rasterized beside it.
+`MarkdownToNotebook[source, "file.nb"]` writes the notebook to the `.nb` *file* and returns the file.
+
+`MarkdownToNotebook[source, "file.md"]` writes a markdown twin of the document, with each evaluated output rasterized to an image beside it, and returns the file.
 
 ## Basic Examples
 
@@ -115,7 +117,7 @@ MarkdownToNotebook["# Title\n\n## Section\n\n### Subsection\n\nA paragraph of te
 
 ### Inline formatting
 
-Inline `` `code` `` is formatted code, `*emphasis*` is italic, a double-backtick ``literal`` is a verbatim span, and `$...$` is inline TeX math:
+Inline `` `code` `` is formatted code, `*emphasis*` is italic, a double-backtick ``literal`` is a verbatim span, and a `$x$` span is inline TeX math:
 
 ```wl
 #| screenshot: true
@@ -160,11 +162,11 @@ Export[FileNameJoin[{$TemporaryDirectory, "snippet.wl"}], "Range[5]^2", "Text"];
 
 ### Inlining an image
 
-A markdown image `![alt](path)` inlines an image - a local file or URL, resolved relative to the source (this is the function's headline image, markdown in and a notebook out):
+A markdown image `![alt](path)` inlines an image - a local file or URL, resolved relative to the source. The image's *title* is a raw cell-style override: here `"ExampleImage"` styles the function's headline image (markdown in, a notebook out) as a documentation figure:
 
-![MarkdownToNotebook: markdown in, a notebook out](docs/images/headline.png)
+![MarkdownToNotebook: markdown in, a notebook out](docs/images/headline.png "ExampleImage")
 
-A `"papertear"` title - `![alt](path "papertear")` - additionally applies the front end's Convert To > Paper Tear cell effect for a torn-screenshot look (the same effect a code cell's `#| tear:` option gives its output, used under Applications below).
+The title defaults to `Output`; the special title `"papertear"` keeps `Output` and adds the front end's Convert To > Paper Tear cell effect for a torn-screenshot look (the same effect a code cell's `#| tear:` option gives its output, used under Applications below).
 
 ### Returning a notebook, an association, or a file
 
@@ -212,7 +214,7 @@ MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", "Evaluate" -> False]
 
 ## Applications
 
-Generate a paclet's entire documentation set, the guide page, the symbol reference pages, and a publishable Function Repository definition, from plain markdown, so authors never edit notebook cell styles by hand. The published [Wolfram/AccessibleColors](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/AccessibleColors/) paclet is built this way end to end. Here its guide page is converted straight from the markdown on [GitHub](https://github.com/sw1sh/AccessibleColors); the `#| screenshot: true` cell option rasterizes the produced notebook and `#| tear: 150` gives it a torn-paper screenshot look, keeping the top 150 points of output visible above the tear:
+Generate a paclet's entire documentation set, the guide page, the symbol reference pages, and a publishable [Function Repository](https://resources.wolframcloud.com/FunctionRepository/) definition, from plain markdown, so authors never edit notebook cell styles by hand. The published [Wolfram/AccessibleColors](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/AccessibleColors/) paclet is built this way end to end. Here its guide page is converted straight from the markdown on [GitHub](https://github.com/sw1sh/AccessibleColors); the `#| screenshot: true` cell option rasterizes the produced notebook and `#| tear: 150` gives it a torn-paper screenshot look, keeping the top 150 points of output visible above the tear:
 
 ```wl
 #| screenshot: true
@@ -222,7 +224,7 @@ MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/mai
 
 ## Properties and Relations
 
-The Wolfram Language already reads markdown into a plain notebook - [`Import`]["doc.md", "Notebook"], or [`ImportString`][markdown, {"Markdown", "Notebook"}] for a string. `MarkdownToNotebook` builds on that idea and adds the resource layer: the layout chosen from frontmatter, the metadata slots, cell options, and evaluated and cached example cells. The built-in import of the same snippet gives just the bare cells (it does parse inline TeX math, the same convention `$...$` uses here):
+The Wolfram Language already reads markdown into a plain notebook - [`Import`]["doc.md", "Notebook"], or [`ImportString`][markdown, {"Markdown", "Notebook"}] for a string. `MarkdownToNotebook` builds on that idea and adds the resource layer: the layout chosen from frontmatter, the metadata slots, cell options, and evaluated and cached example cells. The built-in import of the same snippet gives just the bare cells (it does parse inline TeX math, the same `$x$` convention used here):
 
 ```wl
 ImportString["# Title\n\nText with inline math $\\sin x$.", {"Markdown", "Notebook"}]

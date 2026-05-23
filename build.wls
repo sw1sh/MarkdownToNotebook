@@ -96,6 +96,14 @@ If[ TrueQ[$CloudConnected],
     deployed = UsingFrontEnd @ Block[{nbo, res},
         CurrentValue[$FrontEnd, LightDark] = "Light";
         nbo = NotebookOpen[File[outNb]];
+        (* the headless front end does not assign CellIDs on open, so the resource
+           scraper cannot find the definition cell and deploys an empty function.
+           Turn on CreateCellID and save once to make the front end stamp every cell
+           with an ID (what happens automatically when a person edits the notebook),
+           so the scrape sees the definition. *)
+        CurrentValue[nbo, CreateCellID] = True;
+        SelectionMove[nbo, All, Notebook];
+        FrontEndTokenExecute[nbo, "Save"];
         DefinitionNotebookClient`$ClickedButton = "Deploy";
         DefinitionNotebookClient`$ClickedAction = "Publicly in the cloud";
         res = DefinitionNotebookClient`DeployResource[nbo, "CloudPublic"];
