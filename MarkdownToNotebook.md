@@ -117,11 +117,11 @@ MarkdownToNotebook["# Title\n\n## Section\n\n### Subsection\n\nA paragraph of te
 
 ### Inline formatting
 
-Inline `` `code` `` is formatted code, `*emphasis*` is italic, a double-backtick ``literal`` is a verbatim span, and a `$x$` span is inline TeX math:
+Inline `` `code` `` is formatted code; `*italic*` (or `_italic_`) is emphasis, `**bold**` (or `__bold__`) is bold, and `~~struck~~` is strikethrough; a double-backtick ``literal`` is a verbatim span and a `$x$` span is inline TeX math. A backslash escapes the next punctuation, and underscore emphasis is matched only at word boundaries so a `snake_case` name in prose is left untouched:
 
 ```wl
 #| screenshot: true
-MarkdownToNotebook["Inline `Range[3]`, *emphasis*, ``verbatim``, and the math $\\sqrt{a^2 + b^2}$."]
+MarkdownToNotebook["Inline `Range[3]`, *italic*, **bold**, ~~struck~~, ``verbatim``, and the math $\\sqrt{a^2 + b^2}$."]
 ```
 
 ### Links
@@ -141,11 +141,20 @@ MarkdownToNotebook["See [`Range`] and the [Wolfram site](https://www.wolfram.com
 
 ### Lists and tables
 
-`-`, `*`, or `+` lines become items, and a GitHub-style pipe table becomes a grid:
+`-`, `*`, or `+` lines become bullet items, `1.`/`2.` lines a numbered list, and `- [ ]`/`- [x]` lines a task list (a ballot-box glyph); a GitHub-style pipe table becomes a grid:
 
 ```wl
 #| screenshot: true
-MarkdownToNotebook["- one\n- two\n\n| x | y |\n|---|---|\n| 1 | 2 |"]
+MarkdownToNotebook["1. first\n2. second\n\n- [x] done\n- [ ] todo\n\n| x | y |\n|---|---|\n| 1 | 2 |"]
+```
+
+### Blockquotes
+
+Consecutive `>` lines become a quote, set off by a left rule and indent:
+
+```wl
+#| screenshot: true
+MarkdownToNotebook["> A quoted remark,\n> carried across two lines."]
 ```
 
 ### Evaluated code cells
