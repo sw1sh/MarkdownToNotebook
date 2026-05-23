@@ -1,0 +1,57 @@
+---
+name: wolfram-guide-page
+description: Author a Wolfram Language guide page (a paclet's documentation home page that lists its functions, like the built-in guide/ pages) as a literate-markdown document and build it with MarkdownToNotebook. Use this whenever the user wants to write or generate a guide page, a paclet landing/overview page, or a curated function index for a Wolfram paclet - rather than hand-editing the DocumentationTools guide authoring notebook.
+---
+
+# Authoring a guide page in markdown
+
+`MarkdownToNotebook` fills the DocumentationTools guide authoring notebook (which
+`DocumentationBuild` turns into a `guide/` page) from a literate-markdown document
+with the `Guide` template. A guide page is a paclet's documentation home: an
+abstract plus a curated, annotated list of the paclet's functions. The worked
+example is `examples/AccessibleColors/docs/Guides/AccessibleColors.md`; model new
+guides on it and read `docs/doc-pages.md`.
+
+## Frontmatter
+
+```
+---
+Template: Guide
+Name: GuideName
+Title: Guide Title
+Context: Publisher`PacletName`
+Paclet: Publisher/PacletName
+URI: Publisher/PacletName/guide/GuideName
+Description: One-line summary of the paclet
+Keywords: [keyword one, keyword two]
+RelatedGuides: [OtherGuide, Accessibility]
+Links: ["[label](https://example.com)"]
+---
+```
+
+`RelatedGuides` are context-aware: a guide that is not the paclet's own (e.g. a
+System overview guide like `Colors`) links to `paclet:guide/Name`.
+
+## Sections
+
+- `## Abstract` - several sentences of context under the title. (If omitted, the
+  `Description` frontmatter is used.)
+- `## Functions` - a markdown list, one item per function, each
+  `` `Symbol` description ``. Each item becomes a docked "1-Line Function" entry: a
+  chip linking to the symbol's `ref/` page, an em-dash, and the inline-formatted
+  description. The backticked symbol at the start is required for the link.
+
+Group functions under `### Subheadings` if the guide has sections of related
+functions. Keep the page a concise overview, not full documentation - the symbol
+reference pages (the `wolfram-symbol-page` skill) carry the detail.
+
+## Build
+
+```
+Get["MarkdownToNotebook.wl"];
+MarkdownToNotebook["GuideName.md", "Documentation/English/Guides/GuideName.nb"]
+```
+
+Then build the paclet docs with `DocumentationBuild`. The guide is usually the
+paclet's `MainGuide` (set that relative path in the paclet's frontmatter; author the
+paclet with the `wolfram-paclet` skill).
