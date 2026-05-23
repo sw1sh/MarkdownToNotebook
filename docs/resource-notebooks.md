@@ -160,10 +160,14 @@ markdown maps as:
 | `Keywords` | `Keywords` | metadata |
 | `ContributedBy` | `ContributorInformation` | contributor |
 
-The defining cells go under `## Content`: each executable `wl` cell is the literal
-content assignment (typically
-`ResourceData[ResourceObject[EvaluationNotebook[]], "name"] = value`) and becomes an
-`Input` cell carrying the `DefaultContent` tag the scraper needs. Unlike the Function
+The defining cells go under `## Content`: each `wl` cell becomes an `Input` cell
+carrying the `DefaultContent` tag the scraper needs (content cells are included
+whether or not they carry `#| eval: false`, since the assignment itself only resolves
+in the deployed notebook). A common pattern is a helper definition (evaluated, so the
+examples can reuse it) followed by the literal content assignments
+(`ResourceData[ResourceObject[EvaluationNotebook[]], "name"] = value`, marked
+`#| eval: false` because `ResourceObject[EvaluationNotebook[]]` has no meaning in a
+headless convert session). Unlike the Function
 template's named example sections, the Example template has a single `Examples` slot,
 so a plain `## Examples` section fills it directly (intro prose as `Text`, computations
 as `Input`/`Output`). The Example resource's category labels differ from the Function

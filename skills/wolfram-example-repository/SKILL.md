@@ -12,9 +12,12 @@ elements** (data fetched with [`ResourceData`]) together with worked examples th
 show how to use them. The author writes YAML frontmatter and `## section` headings;
 the converter chooses every cell style. Use the `Example` template.
 
-Model new documents on the worked example at
-https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/PrimeSpiralPoints.md ,
-and read https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-notebooks.md
+Model new documents on the worked examples - a minimal one at
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/PrimeSpiralPoints.md
+and a richer one (multiple content elements, `eval: false` content cells, inline
+math, several plots, a hero) at
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/QuantumWalk.md - and
+read https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-notebooks.md
 (the "Example" section) for the slot-by-slot mapping.
 
 ## Frontmatter

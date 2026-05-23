@@ -554,7 +554,9 @@ functionSlot[opts_, defCode_String] := If[ defCode === "",
    executable cell in a "## Content" section is the literal defining assignment
    (typically ResourceData[ResourceObject[EvaluationNotebook[]], "name"] = value) and
    becomes an Input cell carrying the "DefaultContent" tag the scraper needs. *)
-contentSlot[opts_, sections_] := Block[{cells = sectionCells[sections, "content"]},
+codeBlockQ[b_] := b["Type"] === "Code" && MemberQ[{"wl", "wolfram", "mathematica"}, b["Lang"]]
+
+contentSlot[opts_, sections_] := Block[{cells = Cases[Lookup[sections, "content", {}], b_ /; codeBlockQ[b]]},
     If[ cells === {},
         slotDefault[opts],
         Map[Cell[BoxData[inputBoxes[#["Code"]]], "Input", CellTags -> {"DefaultContent"}] &, cells]
