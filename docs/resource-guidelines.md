@@ -51,8 +51,10 @@ when in doubt - they are the authority:
   - Scope: demonstrate the breadth, including every documented input pattern.
   - Applications / Neat Examples: richer or surprising uses.
 - **Author Notes** / **Submission Notes** - optional background and reviewer info.
-- Deploy publicly with `DefinitionNotebookClient`DeployResource["Function", nbo,
-  "CloudPublic"]`; submit with the docked Submit button / `ResourceSubmit`.
+- Deploy publicly by scraping the notebook into a `ResourceObject` and
+  `CloudDeploy`-ing the resulting `ResourceFunction` (a headless `DeployResource`
+  scrapes an empty definition - see [subtleties](subtleties.md)); submit to the
+  repository with the docked Submit button / `ResourceSubmit`.
 
 ## Paclet Repository
 

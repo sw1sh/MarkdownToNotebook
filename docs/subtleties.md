@@ -319,12 +319,12 @@ Build with a current kernel (and `PacletInstall["DefinitionNotebookClient", Upda
 as a safeguard); note that a custom `wolframscript` may point at a different
 Wolfram installation (hence an older paclet) than your front end.
 
-### `DeployResource` needs a `NotebookObject`, not `File[…]`
-The docked Deploy > "Publicly in the cloud" action is
-`DefinitionNotebookClient`DeployResource[rtype, notebook, "CloudPublic"]`, but
-`notebook` must be an **open** `NotebookObject` - pass `File[nb]` and the call
-returns unevaluated. Open it first:
-`UsingFrontEnd @ Block[{nbo = NotebookOpen[File[nb]], r}, r = DefinitionNotebookClient`DeployResource["Function", nbo, "CloudPublic"]; NotebookClose[nbo]; r]`.
+### Scraping a resource needs an open `NotebookObject`, not `File[…]`
+`ResourceObject[notebook]` (and `DeployResource`) needs an **open**
+`NotebookObject`; pass `File[nb]` and a `"Notebook"`-type paclet directory fails to
+resolve (`PacletDirectoryMissing`) or the call returns unevaluated. Open it first
+with `UsingFrontEnd @ NotebookOpen[File[nb]]`, assign CellIDs, then scrape (see the
+headless-deploy note below for the full `ResourceObject` + `CloudDeploy` round-trip).
 
 ### Force light mode at *both* the notebook and the front-end session
 Dark mode bites in two places. (1) Set the notebook option `LightDark -> "Light"`
@@ -337,23 +337,25 @@ session before deploying: `CurrentValue[$FrontEnd, LightDark] = "Light"`. Same f
 any `Rasterize` of example output - bake `LightDark -> "Light"` into the rendered
 `Notebook[…]` so the image is light regardless of the session.
 
-### Show a produced notebook: both renderings are opt-in cell options
-Faithfully splicing a produced notebook's **actual cells** works and is crisp -
-the trick is to splice the real `Cell` expressions (Title, Text with inline TeX,
-Section, Input/Output) into a **nested cell group** under the input
-(`Cell[CellGroupData[{inputCell, Cell[CellGroupData[cells, Open]]}, Open]]`), not
-to `RawBoxes` them (that silently drops Text/Input content) and not under the input
-flat (that breaks layout). Rendering a notebook output is **opt in** via a `#|`
-cell option (never automatic, never a default raster):
+### Show a produced notebook: rasterize, never splice
+A produced notebook has no faithful inline form, and splicing its **actual cells**
+into the surrounding notebook does not work: a Title/Section renders document-wide,
+`RawBoxes[Cell[...]]` silently drops Text/Input content, and `CellFrame` only
+frames a group's opener (it does not bound the cells). So show it as a *rasterized
+thumbnail* instead:
 
-- `#| notebook_splice: true` -> frame splice (the cells, crisp). `outputBoxes`
-  returns a `splicedNotebook[cells]` marker that `exampleIO` drops into the group.
-- `#| screenshot: true` -> rasterize to an image; pair with `#| background:
-  papertear` for the torn-paper screenshots under Applications/Neat.
+- A bare `Notebook` *expression* result (what `MarkdownToNotebook[source]` returns)
+  shows as its literal expression boxes unless the cell carries `#| screenshot:
+  true`, which rasterizes the notebook to an image.
+- A cell that *opens* the notebook (`NotebookPut[MarkdownToNotebook[…]]`, returning
+  a `NotebookObject`, the way published WFR functions return notebooks) is always
+  rasterized to a thumbnail and the object closed.
+- Pair either with `#| tear: h` for the torn-paper look: it sets `BackgroundAppearance
+  -> "PaperTear"` and a `CellSize` of height `h` (the tear only shows once the cell
+  is height-constrained; `h` is the visible height in points).
 
-With neither, the result is its normal output boxes (a bare `Notebook` expression,
-what `MarkdownToNotebook[source]` returns, shows as itself). The option is named
-`notebook_splice`, not `splice` (which is ambiguous).
+(The removed `notebook_splice` option and the cell-splice / `RawBoxes` approaches
+are gone - they never rendered correctly.)
 
 ### Self-referential examples need the converter's context on the path
 Example cells evaluate in a private `$Context` with `$ContextPath` of just the

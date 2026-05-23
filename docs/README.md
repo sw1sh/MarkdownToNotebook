@@ -88,7 +88,10 @@ docs/update-screenshots.wls` after changing the converter or the example docs.
 | `WolframVersion` | e.g. `14.0+` | FunctionResource |
 | `EntrySymbol` | the function symbol (self-hosting) | FunctionResource |
 
-`MarkdownToNotebook` takes no options. The layout is the document's `Template`
-frontmatter; the optional second argument selects the result (`"Notebook"`,
-`"Association"`, or a file path to write); example outputs are cached with the
-built-in persistence framework (`PersistentSymbol` at `"Local"`).
+`MarkdownToNotebook` takes one option, `"Evaluate"` (default `True`;
+`"Evaluate" -> False` leaves example cells unevaluated, used by self-referential
+documents). The layout is the document's `Template` frontmatter; the optional
+second argument selects the result (`"Notebook"`, `"Association"`, a `.nb` file to
+write the notebook, or a `.md` file to write a rasterized markdown twin); example
+outputs are cached with the built-in persistence framework (`PersistentSymbol` at
+`"Local"`).
