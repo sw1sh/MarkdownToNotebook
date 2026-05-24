@@ -1555,21 +1555,35 @@ serializeTableMd[block_] := StringRiffle[Join[
     ("| " <> StringRiffle[#, " | "] <> " |") & /@ block["Rows"]
 ], "\n"]
 
+(* write the rasterized image only if it differs pixel-wise from what's on disk:
+   PNG re-encoding is non-deterministic at the byte level (compression / timestamps),
+   so two visually identical re-renders would otherwise show as "modified" and churn
+   git history. Compare raw byte ImageData (dimensions first, as a cheap reject). *)
+writeImageIfChanged[path_String, img_] := Block[{existing},
+    existing = If[FileExistsQ[path], Quiet @ Import[path], None];
+    If[ ImageQ[existing] && ImageQ[img] &&
+        ImageDimensions[existing] === ImageDimensions[img] &&
+        ImageData[existing, "Byte"] === ImageData[img, "Byte"],
+        path,
+        Quiet @ Export[path, img, "PNG"]; path
+    ]
+]
+
 markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n = 0, mdOf, codeMd},
     dir = DirectoryName[target]; base = FileBaseName[target];
     imgDir = FileNameJoin[{dir, "images"}];
     Quiet @ CreateDirectory[imgDir, CreateIntermediateDirectories -> True];
-    codeMd[b_] := Block[{fence, imgFile},
+    codeMd[b_] := Block[{fence, imgFile, img},
         fence = "```" <> b["Lang"] <> "\n" <> If[
             KeyExistsQ[b["Options"], "file"], "#| file: " <> b["Options"]["file"] <> "\n",
             StringJoin["#| " <> # <> ": " <> ToString[b["Options"][#]] <> "\n" & /@ Keys[b["Options"]]] <> b["Code"] <> "\n"
         ] <> "```";
         If[ executableQ[b] && ! MissingQ[b["OutputBoxes"]] && b["OutputBoxes"] =!= Null,
             n += 1; imgFile = base <> "-" <> ToString[n] <> ".png";
-            Quiet @ Export[FileNameJoin[{imgDir, imgFile}],
-                UsingFrontEnd @ Rasterize[
-                    Notebook[{Cell[BoxData[b["OutputBoxes"]], "Output", Sequence @@ extraOutputOpts[b]]}, LightDark -> $lightDark, StyleDefinitions -> "Default.nb"],
-                    ImageResolution -> 96]];
+            img = UsingFrontEnd @ Rasterize[
+                Notebook[{Cell[BoxData[b["OutputBoxes"]], "Output", Sequence @@ extraOutputOpts[b]]}, LightDark -> $lightDark, StyleDefinitions -> "Default.nb"],
+                ImageResolution -> 96];
+            writeImageIfChanged[FileNameJoin[{imgDir, imgFile}], img];
             fence <> "\n\n![output](images/" <> imgFile <> ")",
             fence
         ]
