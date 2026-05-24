@@ -27,8 +27,8 @@ markdown for each (most **[todo]**):
 | Bold | `StyleBox[…,FontWeight->"Bold"]` | `**bold**` or `__bold__` **[done]** |
 | Bold italic | `StyleBox[…,"TI",FontWeight->"Bold"]` | `***both***` **[done]** |
 | Strikethrough | `StyleBox[…,FontVariations->{"StrikeThrough"->True}]` | `~~struck~~` **[done]** |
-| Subscript | `SubscriptBox["",s]` in an `InlineFormula` cell | `H~2~O` (Pandoc / GFM) **[done]** |
-| Superscript | `SuperscriptBox["",s]` in an `InlineFormula` cell | `2^10^` (Pandoc / GFM) **[done]** |
+| Subscript | `SubscriptBox["",s]` in an `InlineFormula` cell | `H<sub>2</sub>O` (also `H~2~O`) **[done]** |
+| Superscript | `SuperscriptBox["",s]` in an `InlineFormula` cell | `2<sup>10</sup>` (also `2^10^`) **[done]** |
 | Plain Text / Literal | `InlineFormula` literal string | `` `"literal"` `` (a string parses to itself) **[done, implicit]** |
 | Traditional Math | `FormBox[…,TraditionalForm]` | `$math$` inline, `$$math$$` centered display **[done]** |
 | Inline image | embedded graphic (or link fallback) | `![alt](src)` mid-text **[done]** |
@@ -37,10 +37,26 @@ Underscore emphasis is matched only at word boundaries, so `snake_case` in prose
 left alone (use `*…*` if a single word ever needs emphasis). A backslash escapes the
 next punctuation character (`\*`, `` \` ``, `\_`, ...) so it renders literally.
 
-Inside a `## Usage` signature span, `~i~` also marks the argument's subscript:
-`` `f[x~1~, x~2~]` `` renders as italic *f*, *x*₁, *x*₂. The signature is parsed
-by `DocumentationTools` ``` `Private` `ParseTextTemplate`, with `~i~` rewritten to
-the template form `$i` before the parse.
+Prefer the HTML `<sub>` / `<sup>` form: every markdown renderer (CommonMark, GFM,
+Pandoc with its default `markdown` flavor and almost every other) treats these as
+literal HTML and renders them as subscripts / superscripts. The `~i~` / `^i^` Pandoc
+shorthand needs the `subscript` / `superscript` extension, which not every flavor
+turns on. Neither form renders inside a markdown code span, because markdown forbids
+nested formatting there.
+
+A `## Usage` signature should therefore be written in prose with inline-math arguments
+- the only form that renders correctly in pandoc / GitHub *and* the converter:
+
+```
+SymbolName[$x_1$, $x_2$] gives the foo, computed from $x_1$ and $x_2$.
+```
+
+Pandoc and GitHub render each `$x_i$` as inline TeX math (italic *x*ᵢ); the converter
+extracts the signature head + bracket group, rewrites each `$x_i$` to the
+`ParseTextTemplate` form `x$i`, and feeds the reconstructed `SymbolName[x$1, x$2]`
+through the usage template parser so the notebook gets the same italic, subscripted
+arguments. A legacy backtick-wrapped signature (`` `SymbolName[x~1~, x~2~]` ``) still
+works for the converter but does not render in pandoc / GitHub.
 
 ## Code cells  [done]
 

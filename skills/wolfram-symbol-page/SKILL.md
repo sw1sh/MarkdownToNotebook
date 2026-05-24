@@ -44,9 +44,14 @@ resolves this). `URI` is the page's `ref/` path.
 
 ## Sections
 
-- `## Usage` - one statement per paragraph beginning with a `` `code` `` span: the
-  span is the signature (`` `SymbolName[x~1~, x~2~]` ``, arguments as `x~1~`) and the
-  rest is the description.
+- `## Usage` - one statement per paragraph: write the signature as prose with
+  inline-math arguments (`SymbolName[$x_1$, $x_2$]`, args via `$..._n$`), then a
+  description (which can refer back to the args with the same `$x_1$` math
+  spans). Pandoc renders this directly as math; the converter rewrites `$x_1$` to
+  the template form `x$1` and feeds it through DocumentationTools' usage
+  template-parser. A legacy backtick-wrapped signature
+  (`` `SymbolName[x~1~, x~2~]` ``) still works but does not render in pandoc /
+  GitHub (no nested formatting inside code spans).
 - `## Details & Options` - bullets become `Notes` cells; pipe tables become grids
   (use one for an options table). Link other symbols inline with `` [`Symbol`] ``.
 - `## Basic Examples` then the extended sections `## Scope`, `## Options`,

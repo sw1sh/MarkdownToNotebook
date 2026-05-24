@@ -61,8 +61,14 @@ Always set `Categories` - an empty checkbox group is a submission hint.
   first line is `#| file: path` (resolved relative to the document), so the code
   keeps full IDE/lint support. The cell carries the `"DefaultContent"` cell tag the
   scraper needs - the converter handles that.
-- `## Usage` - one statement per paragraph that begins with a `` `code` `` span: the
-  span is the signature (`` `MyFunction[x]` ``) and the rest is its description.
+- `## Usage` - one statement per paragraph: write the signature as prose with
+  inline-math arguments (`MyFunction[$x$]` for a single arg, `MyFunction[$x_1$, $x_2$]`
+  for indexed ones), then the description (which can refer back to the args with the
+  same `$x_1$` math spans). Pandoc renders this directly as math; the converter
+  rewrites `$x_i$` to the template form `x$i` and feeds it through the usage
+  template parser. A legacy backtick-wrapped signature (`` `MyFunction[x]` ``) still
+  works but does not render in pandoc / GitHub (no nested formatting inside code
+  spans).
 - `## Details & Options` - bullets, each becomes a `Notes` cell; a markdown pipe
   table becomes a `TableNotes` grid (use it for an options table).
 - Example sections, in order: `## Basic Examples` (start with the simplest use),

@@ -644,8 +644,28 @@ contentSlot[opts_, sections_] := Block[{cells = Cases[Lookup[sections, "content"
    `MarkdownToNotebook[source]`) and the rest is its description. The signature
    is templated like the "Template Input" button (arguments italic, head linked)
    and the description keeps its inline formatting. *)
-usageStatement[text_String] := StringCases[StringTrim[text],
-    StartOfString ~~ "`" ~~ c : Shortest[__] ~~ "`" ~~ rest___ :> {c, StringTrim[rest]}, 1]
+(* a usage statement is either a backticked code-span signature (legacy form,
+   `Name[c$1, c$2]`) or a prose signature with inline-math arguments (the
+   pandoc-friendly form, "Name[$c_1$, $c_2$]"). The math form renders correctly
+   in pandoc / GitHub since markdown forbids nested formatting inside code spans;
+   for our notebook output, "$c_1$" is rewritten to the ParseTextTemplate
+   subscript form "c$1" and fed through templateBox. *)
+mathArgsToTemplate[s_String] := StringReplace[s, {
+    "$" ~~ base:(LetterCharacter ~~ (WordCharacter ...)) ~~ "_" ~~ "{" ~~ sub:Shortest[Except["}"]..] ~~ "}" ~~ "$" :> base <> "$" <> sub,
+    "$" ~~ base:(LetterCharacter ~~ (WordCharacter ...)) ~~ "_" ~~ sub:(DigitCharacter | LetterCharacter) ~~ "$" :> base <> "$" <> ToString[sub],
+    "$" ~~ ident:(LetterCharacter ~~ (WordCharacter ...)) ~~ "$" :> ident
+}]
+
+usageStatement[text_String] := Block[{trimmed = StringTrim[text], m},
+    m = StringCases[trimmed,
+        StartOfString ~~ "`" ~~ c : Shortest[__] ~~ "`" ~~ rest___ :> {c, StringTrim[rest]}, 1];
+    If[m =!= {}, Return[m]];
+    (* prose form: an identifier head, then [ ... ] balanced once, then prose. *)
+    StringCases[trimmed,
+        StartOfString ~~ name:(LetterCharacter ~~ (WordCharacter | "`") ...) ~~ args:("[" ~~ Shortest[Except["\n"]..] ~~ "]") ~~ rest___ :>
+            {name <> mathArgsToTemplate[args], StringTrim[rest]},
+        1]
+]
 
 usagePair[{code_String, desc_String}] := {
     Cell[BoxData[stripLinks @ templateBox[code]], "UsageInputs", FontFamily -> "Source Sans Pro"],
@@ -981,11 +1001,14 @@ $docPaclet = ""
 $docContext = ""
 $docTemplate = ""
 
-(* In markdown source, subscripts use the Pandoc / GFM convention "x~i~" (the
-   markdown-native sub syntax) rather than Wolfram's "x$i" template form. Rewrite
-   "x~i~" -> "x$i" inside a usage signature so ParseTextTemplate's existing
-   subscript handling does the rest. *)
-mdToTemplateSubs[s_String] := StringReplace[s, "~" ~~ i:Shortest[Except["~"]..] ~~ "~" :> "$" <> i]
+(* Subscripts in a usage signature use the portable HTML form "x<sub>i</sub>" (works
+   in every markdown renderer and on GitHub), with "x~i~" accepted as the Pandoc
+   shorthand. Both forms are rewritten to ParseTextTemplate's "x$i" template form
+   so its existing subscript handling does the rest. *)
+mdToTemplateSubs[s_String] := StringReplace[s, {
+    "<sub>" ~~ i:Shortest[Except["<"]..] ~~ "</sub>" :> "$" <> i,
+    "~" ~~ i:Shortest[Except["~"]..] ~~ "~" :> "$" <> i
+}]
 
 templateBox[code_String] := Block[{boxes, prepped = mdToTemplateSubs[StringTrim[code]]},
     Needs["DocumentationTools`"];
@@ -1160,9 +1183,12 @@ inlineTextData[text_String] := Replace[
             "$$" ~~ m : Shortest[Except["$"] ..] ~~ "$$" :> mathInline[m],
             "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
             "~~" ~~ s : Shortest[__] ~~ "~~" :> emStrikeBox[s],
-            (* single-tilde subscript "H~2~O", single-caret superscript "2^10^" -
-               the Pandoc / GFM convention; listed after "~~" so strikethrough wins
-               at a doubled-tilde position. *)
+            (* portable subscript "H<sub>2</sub>O" and superscript "2<sup>10</sup>" -
+               HTML tags renderers agree on. The single-tilde / single-caret Pandoc
+               shorthands ("H~2~O", "2^10^") are accepted too; listed after "~~" so
+               strikethrough wins at a doubled-tilde position. *)
+            "<sub>" ~~ s : Shortest[Except["<"] ..] ~~ "</sub>" :> proseSubBox[s],
+            "<sup>" ~~ s : Shortest[Except["<"] ..] ~~ "</sup>" :> proseSupBox[s],
             "~" ~~ s : Shortest[Except["~"|" "] ..] ~~ "~" :> proseSubBox[s],
             "^" ~~ s : Shortest[Except["^"|" "] ..] ~~ "^" :> proseSupBox[s],
             "***" ~~ s : Shortest[__] ~~ "***" :> emBoldItalicBox[s],
