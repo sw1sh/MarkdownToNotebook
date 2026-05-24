@@ -1041,12 +1041,14 @@ mathInline[math_String] := Block[{boxes = texBoxes[math]},
 ]
 
 (* $$ ... $$ on its own line (or fenced across lines) -> a centered "DisplayFormula"
-   cell (the standard cell style for a displayed equation). *)
-mathBlockCell[math_String] := Block[{boxes = texBoxes[math]},
-    If[ boxes === $Failed,
-        Cell[BoxData[FormBox[inputBoxes[math], TraditionalForm]], "DisplayFormula"],
-        Cell[BoxData[boxes], "DisplayFormula"]
-    ]
+   cell. Stylesheets vary in whether DisplayFormula centers within the cell or
+   left-indents it, so wrap the formula in a PaneBox that takes the full cell width
+   and centers its content; that way the equation sits horizontally centered the way
+   a markdown viewer renders display math, in any stylesheet. *)
+mathBlockCell[math_String] := With[{
+    boxes = Replace[texBoxes[math], $Failed -> FormBox[inputBoxes[math], TraditionalForm]]
+},
+    Cell[BoxData[PaneBox[boxes, ImageSize -> Full, Alignment -> Center]], "DisplayFormula"]
 ]
 
 (* markdown links: [text](paclet:Pub/Name/ref/Sym) -> a reference Link (palette
