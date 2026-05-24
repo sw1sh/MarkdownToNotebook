@@ -124,6 +124,15 @@ Inline `` `code` `` is formatted code; `*italic*` (or `_italic_`) is emphasis, `
 MarkdownToNotebook["Inline `Range[3]`, *italic*, **bold**, ~~struck~~, ``verbatim``, and the math $\\sqrt{a^2 + b^2}$."]
 ```
 
+### Display math
+
+A `$$ ... $$` block (on its own line, or fenced across lines) becomes a centered `DisplayFormula` cell - the standard style for a displayed equation:
+
+```wl
+#| screenshot: true
+MarkdownToNotebook["The Pythagorean identity:\n\n$$ a^2 + b^2 = c^2 $$"]
+```
+
 ### Links
 
 Three link forms are supported:

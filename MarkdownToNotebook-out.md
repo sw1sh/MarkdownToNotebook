@@ -128,6 +128,17 @@ MarkdownToNotebook["Inline `Range[3]`, *italic*, **bold**, ~~struck~~, ``verbati
 
 ![output](images/MarkdownToNotebook-out-6.png)
 
+### Display math
+
+A `$$ ... $$` block (on its own line, or fenced across lines) becomes a centered `DisplayFormula` cell - the standard style for a displayed equation:
+
+```wl
+#| screenshot: True
+MarkdownToNotebook["The Pythagorean identity:\n\n$$ a^2 + b^2 = c^2 $$"]
+```
+
+![output](images/MarkdownToNotebook-out-7.png)
+
 ### Links
 
 Three link forms are supported:
@@ -143,7 +154,7 @@ For example:
 MarkdownToNotebook["See [`Range`] and the [Wolfram site](https://www.wolfram.com)."]
 ```
 
-![output](images/MarkdownToNotebook-out-7.png)
+![output](images/MarkdownToNotebook-out-8.png)
 
 ### Lists and tables
 
@@ -154,7 +165,7 @@ MarkdownToNotebook["See [`Range`] and the [Wolfram site](https://www.wolfram.com
 MarkdownToNotebook["1. first\n2. second\n\n- [x] done\n- [ ] todo\n\n| x | y |\n|---|---|\n| 1 | 2 |"]
 ```
 
-![output](images/MarkdownToNotebook-out-8.png)
+![output](images/MarkdownToNotebook-out-9.png)
 
 ### Blockquotes
 
@@ -165,7 +176,7 @@ Consecutive `>` lines become a quote, set off by a left rule and indent:
 MarkdownToNotebook["> A quoted remark,\n> carried across two lines."]
 ```
 
-![output](images/MarkdownToNotebook-out-9.png)
+![output](images/MarkdownToNotebook-out-10.png)
 
 ### Evaluated code cells
 
@@ -176,7 +187,7 @@ A fenced `wl` cell is evaluated and its output kept (then cached); a cell may ca
 MarkdownToNotebook["```wl\nRange[5]^2\n```"]
 ```
 
-![output](images/MarkdownToNotebook-out-10.png)
+![output](images/MarkdownToNotebook-out-11.png)
 
 ### Inlining a file
 
@@ -187,7 +198,7 @@ A code cell whose first line is `#| file: path` is replaced by the contents of t
 Export[FileNameJoin[{$TemporaryDirectory, "snippet.wl"}], "Range[5]^2", "Text"]; NotebookPut[MarkdownToNotebook[Export[FileNameJoin[{$TemporaryDirectory, "inc.md"}], "## Inlined\n\n```wl\n#| file: snippet.wl\n```", "Text"]]]
 ```
 
-![output](images/MarkdownToNotebook-out-11.png)
+![output](images/MarkdownToNotebook-out-12.png)
 
 ### Inlining an image
 
@@ -205,7 +216,7 @@ Omitted (or `"Notebook"`) returns the [`Notebook`]; `"Association"` returns the 
 MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Association"]
 ```
 
-![output](images/MarkdownToNotebook-out-12.png)
+![output](images/MarkdownToNotebook-out-13.png)
 
 ### Writing a markdown twin
 
@@ -215,7 +226,7 @@ Targeting a markdown file writes a GitHub-renderable *twin* of the document - th
 Module[{dir = CreateDirectory[]}, MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", FileNameJoin[{dir, "twin.md"}]]; Import[FileNameJoin[{dir, "twin.md"}], "Text"]]
 ```
 
-![output](images/MarkdownToNotebook-out-13.png)
+![output](images/MarkdownToNotebook-out-14.png)
 
 ### Flagging a document or cell
 
@@ -225,7 +236,7 @@ The documentation build's *flags* - the front end's Futurize / Excise toolbar bu
 Cases[MarkdownToNotebook["---\nFlag: Future\n---\n# Demo\n\ntext"], Cell[_, style_String /; StringEndsQ[style, "Flag"], ___], Infinity]
 ```
 
-![output](images/MarkdownToNotebook-out-14.png)
+![output](images/MarkdownToNotebook-out-15.png)
 
 ## Options
 
@@ -238,7 +249,7 @@ By default every `wl` example cell is evaluated and its output kept. With the de
 MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
 ```
 
-![output](images/MarkdownToNotebook-out-15.png)
+![output](images/MarkdownToNotebook-out-16.png)
 
 ---
 
@@ -249,7 +260,7 @@ MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
 MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", "Evaluate" -> False]
 ```
 
-![output](images/MarkdownToNotebook-out-16.png)
+![output](images/MarkdownToNotebook-out-17.png)
 
 ## Applications
 
@@ -261,7 +272,7 @@ Generate a paclet's entire documentation set, the guide page, the symbol referen
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/main/docs/Guides/AccessibleColors.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-17.png)
+![output](images/MarkdownToNotebook-out-18.png)
 
 ## Properties and Relations
 
@@ -271,7 +282,7 @@ The Wolfram Language already reads markdown into a plain notebook - [`Import`]["
 ImportString["# Title\n\nText with inline math $\\sin x$.", {"Markdown", "Notebook"}]
 ```
 
-![output](images/MarkdownToNotebook-out-18.png)
+![output](images/MarkdownToNotebook-out-19.png)
 
 `FunctionResource` then fills the same template [`CreateNotebook`]["FunctionResource"] opens (publishable with [`ResourceSubmit`]), and `Symbol`/`Guide` fill the DocumentationTools templates `DocumentationBuild` turns into reference pages.
 
@@ -283,7 +294,7 @@ A string that is neither a URL nor an existing file is treated as raw markdown, 
 MarkdownToNotebook["nonexistent.md", "Association"]["Sections"]
 ```
 
-![output](images/MarkdownToNotebook-out-19.png)
+![output](images/MarkdownToNotebook-out-20.png)
 
 ## Neat Examples
 
@@ -293,6 +304,6 @@ The neatest example is this very document: running the function on its own GitHu
 NotebookPut[MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/MarkdownToNotebook.md", "Evaluate" -> False]]
 ```
 
-![output](images/MarkdownToNotebook-out-20.png)
+![output](images/MarkdownToNotebook-out-21.png)
 
 Because this very document is itself such a literate source - its `## Definition` inlines `MarkdownToNotebook.wl` and its frontmatter is the resource metadata - running the function on it reproduces this definition notebook, so the function publishes itself.

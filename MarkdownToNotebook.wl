@@ -118,7 +118,7 @@ fenceSplit[lines_List, collected_] := If[ fenceQ[First[lines]],
 paraSplit[{}, collected_] := {Reverse[collected], {}}
 paraSplit[lines_List, collected_] := Block[{line = First[lines]},
     If[ StringTrim[line] === "" || fenceQ[line] || headingQ[line] || listItemQ[line] ||
-            orderedItemQ[line] || blockquoteQ[line],
+            orderedItemQ[line] || blockquoteQ[line] || mathBlockOpenQ[line],
         {Reverse[collected], lines},
         paraSplit[Rest[lines], Prepend[collected, line]]
     ]
@@ -151,6 +151,30 @@ orderedSplit[{}, collected_] := {Reverse[collected], {}}
 orderedSplit[lines_List, collected_] := If[ orderedItemQ[First[lines]],
     orderedSplit[Rest[lines], Prepend[collected, orderedText[First[lines]]]],
     {Reverse[collected], lines}
+]
+
+(* a "$$ ... $$" line (or a "$$"-fenced block across multiple lines) is display math.
+   Detected separately from inline "$math$" so it can become a centered DisplayFormula
+   block rather than be mis-parsed as broken inline math on either side. *)
+mathBlockOpenQ[line_String] := StringStartsQ[StringTrim[line], "$$"]
+mathBlockClosedQ[line_String] := Block[{t = StringTrim[line]}, StringLength[t] >= 4 && StringStartsQ[t, "$$"] && StringEndsQ[t, "$$"]]
+
+mathBlockGather[lines_List] := Block[{first = StringTrim @ First[lines], rest = Rest[lines], idx},
+    If[ mathBlockClosedQ[First[lines]],
+        {StringTrim @ StringTake[first, {3, -3}], rest},
+        idx = FirstPosition[rest, l_String /; StringEndsQ[StringTrim[l], "$$"], {0}, {1}, Heads -> False];
+        If[ idx === {0},
+            (* unterminated: take everything after the opening "$$" as content *)
+            {StringTrim @ StringDrop[first, 2], rest},
+            With[{n = First[idx]},
+                {StringTrim @ StringRiffle[Join[
+                    {StringDrop[first, 2]},
+                    rest[[1 ;; n - 1]],
+                    {StringDrop[StringTrim[rest[[n]]], -2]}
+                ], "\n"], rest[[n + 1 ;;]]}
+            ]
+        ]
+    ]
 ]
 
 (* blockquote lines start with ">". Consecutive lines are gathered and the marker
@@ -231,6 +255,10 @@ blockLoop[lines_List, acc_] := Block[{line = First[lines], rest = Rest[lines], s
         blockquoteQ[line],
             split = quoteSplit[lines, {}];
             blockLoop[Last[split], Prepend[acc, <|"Type" -> "Quote", "Text" -> StringRiffle[First[split], " "]|>]]
+        ,
+        mathBlockOpenQ[line],
+            split = mathBlockGather[lines];
+            blockLoop[Last[split], Prepend[acc, <|"Type" -> "MathBlock", "Text" -> First[split]|>]]
         ,
         tableRowLineQ[line] && rest =!= {} && tableSepQ[First[rest]],
             split = tableSplit[lines, {}];
@@ -648,6 +676,7 @@ detailsCells[sections_] := Catenate @ Map[
         "List", listItemCells[block, "Notes"],
         "Table", {tableCell[block]},
         "Quote", {quoteCell[block["Text"]]},
+        "MathBlock", {mathBlockCell[block["Text"]]},
         _, {}
     ],
     Lookup[sections, "details & options", {}]
@@ -731,6 +760,8 @@ exampleContent[sectionBlocks_, textStyle_String] := Block[{counter = 0, out = {}
                 out = Join[out, listItemCells[block, "Item"]],
             block["Type"] === "Quote",
                 AppendTo[out, quoteCell[block["Text"]]],
+            block["Type"] === "MathBlock",
+                AppendTo[out, mathBlockCell[block["Text"]]],
             block["Type"] === "Image",
                 AppendTo[out, imageCell[block]],
             executableQ[block],
@@ -993,15 +1024,28 @@ inlineImage[alt_String, src_String] := Block[{img = Quiet @ Import[src]},
     ]
 ]
 
-(* $math$ -> inline math. The content is TeX (LaTeX math notation): ImportString
-   parses "$...$" into typeset boxes (SqrtBox, FractionBox, ...). Fall back to a
-   Wolfram-expression parse in TraditionalForm if the TeX parse fails. *)
-mathInline[math_String] := Block[{nb, boxes},
+(* $math$ -> inline math; $$math$$ -> centered display math. The content is TeX
+   (LaTeX math notation): ImportString parses it into typeset boxes (SqrtBox,
+   FractionBox, ...). Fall back to a Wolfram-expression parse in TraditionalForm
+   if the TeX parse fails. *)
+texBoxes[math_String] := Block[{nb},
     nb = Quiet @ ImportString["$" <> math <> "$", "TeX"];
-    boxes = If[Head[nb] === Notebook, FirstCase[nb, Cell[BoxData[b_], ___] :> b, $Failed, Infinity], $Failed];
+    If[Head[nb] === Notebook, FirstCase[nb, Cell[BoxData[b_], ___] :> b, $Failed, Infinity], $Failed]
+]
+
+mathInline[math_String] := Block[{boxes = texBoxes[math]},
     If[ boxes === $Failed,
         Cell[BoxData[FormBox[inputBoxes[math], TraditionalForm]], "InlineFormula"],
         Cell[BoxData[boxes], "InlineFormula"]
+    ]
+]
+
+(* $$ ... $$ on its own line (or fenced across lines) -> a centered "DisplayFormula"
+   cell (the standard cell style for a displayed equation). *)
+mathBlockCell[math_String] := Block[{boxes = texBoxes[math]},
+    If[ boxes === $Failed,
+        Cell[BoxData[FormBox[inputBoxes[math], TraditionalForm]], "DisplayFormula"],
+        Cell[BoxData[boxes], "DisplayFormula"]
     ]
 ]
 
@@ -1068,6 +1112,7 @@ inlineTextData[text_String] := Replace[
             "[`" ~~ t : Shortest[Except["`"] ..] ~~ "`]" :> linkInferred[t],
             "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
             "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
+            "$$" ~~ m : Shortest[Except["$"] ..] ~~ "$$" :> mathInline[m],
             "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
             "~~" ~~ s : Shortest[__] ~~ "~~" :> emStrikeBox[s],
             "***" ~~ s : Shortest[__] ~~ "***" :> emBoldItalicBox[s],
@@ -1338,6 +1383,7 @@ tutorialBody[blocks_] := Block[{counter = 0},
             "List", listItemCells[block, "Item"],
             "Table", {tableCell[block]},
             "Quote", {quoteCell[block["Text"]]},
+            "MathBlock", {mathBlockCell[block["Text"]]},
             "Image", {imageCell[block]},
             "Code", If[executableQ[block], (counter += 1; exampleIOFor[block, counter]), withCellFlag[block, {Cell[block["Code"], "Program"]}]],
             _, {}
@@ -1384,6 +1430,7 @@ defaultNotebook[data_] := Block[{counter = 0, cells},
             "List", listItemCells[block, "Item"],
             "Table", {tableCell[block]},
             "Quote", {quoteCell[block["Text"]]},
+            "MathBlock", {mathBlockCell[block["Text"]]},
             "Image", {imageCell[block]},
             "Code",
                 If[ executableQ[block],
@@ -1537,6 +1584,7 @@ markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n
         "Table", serializeTableMd[b],
         "Separator", "---",
         "Quote", "> " <> b["Text"],
+        "MathBlock", "$$ " <> b["Text"] <> " $$",
         "Image", "![" <> Lookup[b, "Alt", ""] <> "](" <> Lookup[b, "Path", ""] <> ")",
         "Code", codeMd[b],
         _, ""

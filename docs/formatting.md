@@ -28,7 +28,7 @@ markdown for each (most **[todo]**):
 | Bold italic | `StyleBox[…,"TI",FontWeight->"Bold"]` | `***both***` **[done]** |
 | Strikethrough | `StyleBox[…,FontVariations->{"StrikeThrough"->True}]` | `~~struck~~` **[done]** |
 | Plain Text / Literal | `InlineFormula` literal string | `` `"literal"` `` (a string parses to itself) **[done, implicit]** |
-| Traditional Math | `FormBox[…,TraditionalForm]` | `$math$` **[done]** |
+| Traditional Math | `FormBox[…,TraditionalForm]` | `$math$` inline, `$$math$$` centered display **[done]** |
 | Inline image | embedded graphic (or link fallback) | `![alt](src)` mid-text **[done]** |
 
 Underscore emphasis is matched only at word boundaries, so `snake_case` in prose is
@@ -123,4 +123,6 @@ blank line before the table.
 ## Math  [done]
 
 `$math$` -> `Cell[BoxData[FormBox[<boxes>, TraditionalForm]], "InlineFormula"]`,
-matching the palette's Traditional Math button.
+matching the palette's Traditional Math button. `$$math$$` on its own line (or
+fenced across lines) -> a centered `DisplayFormula` cell, the standard style for a
+displayed equation.
