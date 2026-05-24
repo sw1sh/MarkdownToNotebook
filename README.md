@@ -34,8 +34,9 @@ ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Functi
 - [`MarkdownToNotebook.wl`](MarkdownToNotebook.wl) - the converter.
 - [`MarkdownToNotebook.md`](MarkdownToNotebook.md) - its own Function Repository
   definition, authored in the very format it converts (self-hosting).
-- [`bootstrap.wls`](bootstrap.wls) - defines the function from the markdown,
-  converts it, and publishes it.
+- [`build.wls`](build.wls) - defines the function from the markdown,
+  converts it, and publishes it. [`build-out.wls`](build-out.wls) regenerates
+  the GitHub-renderable markdown twin.
 - [`docs/`](docs/) - the markdown <-> notebook mapping, the palette/button catalog,
   formatting and resource-notebook references, hard-won [subtleties](docs/subtleties.md),
   and [`update-screenshots.wls`](docs/update-screenshots.wls).
