@@ -37,6 +37,7 @@ mapping.
 | `FunctionResource` | Function Repository definition | `DefinitionTemplate["Function"]` |
 | `Paclet` | Paclet Repository definition | `DefinitionTemplate["Paclet"]` |
 | `Example` | Example Repository definition | `DefinitionTemplate["Example"]` |
+| `Data` | Data Repository definition | `DefinitionTemplate["Data"]` |
 
 - **Doc pages** (`Symbol`/`Guide`/`TechNote`) are *authoring* notebooks; the
   docked **Build** button (`DocumentationBuild`) turns them into the final
@@ -51,6 +52,8 @@ mapping.
   frontmatter, and the palette features they cover.
 - [resource-notebooks.md](resource-notebooks.md) - `FunctionResource` and
   `Paclet`: metadata slots, examples, and the Deploy/Submit/Check toolbar.
+- [data-repository.md](data-repository.md) - the `Data` template: statistical
+  metadata, content elements, the `$$Object` / `$$Data` example convention.
 - [formatting.md](formatting.md) - inline `code`, code cells, file includes,
   links, and the palette's formatting buttons.
 - [palette.md](palette.md) - every Documentation Tools palette and docked-cell

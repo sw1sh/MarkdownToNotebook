@@ -429,16 +429,25 @@ annotateOutputs[blocks_List, hashes_List, outputs_] := Block[{i = 0},
 
 (* === notebook cell builders === *)
 
+(* known example-section keys, in canonical render order. The list is the union of
+   conventions across templates (FunctionResource uses Basic / Scope / Options / ... ;
+   Data uses Basic / Scope & Additional Elements / Visualizations / Analysis); each
+   doc supplies whatever subset is meaningful, and exampleNotebookSlot renders only
+   the present sections in this order. *)
 $exampleOrder = {
-    "basic examples", "scope", "options", "applications",
+    "basic examples", "scope", "scope & additional elements", "options", "applications",
+    "visualizations", "analysis",
     "properties and relations", "possible issues", "neat examples"
 }
 
 $exampleTitle = <|
     "basic examples" -> "Basic Examples",
     "scope" -> "Scope",
+    "scope & additional elements" -> "Scope & Additional Elements",
     "options" -> "Options",
     "applications" -> "Applications",
+    "visualizations" -> "Visualizations",
+    "analysis" -> "Analysis",
     "properties and relations" -> "Properties and Relations",
     "possible issues" -> "Possible Issues",
     "neat examples" -> "Neat Examples"
@@ -855,6 +864,27 @@ fillSlot[name_, opts_, data_] := Block[{meta = data["meta"]},
             ],
         "CompatibilityWolframLanguageVersionRequired",
             fillTextCells[opts, Lookup[meta, "WolframVersion", "14.0+"]],
+        (* Data Repository: statistical-metadata fields. Each is a Text cell; accept
+           either the SMD-prefixed key or the cleaner alias (Author / Title / ...). *)
+        "SMDAuthor", fillTextCells[opts, Lookup[meta, "Author", Lookup[meta, "SMDAuthor", Lookup[meta, "ContributedBy", ""]]]],
+        "SMDTitle", fillTextCells[opts, Lookup[meta, "Title", Lookup[meta, "SMDTitle", Lookup[meta, "Name", ""]]]],
+        "SMDDate", fillTextCells[opts, Lookup[meta, "Date", Lookup[meta, "SMDDate", ""]]],
+        "SMDPublisher", fillTextCells[opts, Lookup[meta, "Publisher", Lookup[meta, "SMDPublisher", ""]]],
+        "SMDGeographicCoverage", fillTextCells[opts, Lookup[meta, "GeographicCoverage", Lookup[meta, "SMDGeographicCoverage", ""]]],
+        "SMDTemporalCoverage", fillTextCells[opts, Lookup[meta, "TemporalCoverage", Lookup[meta, "SMDTemporalCoverage", ""]]],
+        "SMDLanguage", fillTextCells[opts, Lookup[meta, "Language", Lookup[meta, "SMDLanguage", ""]]],
+        "SMDRights", fillTextCells[opts, Lookup[meta, "Rights", Lookup[meta, "SMDRights", ""]]],
+        "Citation",
+            fillTextCells[opts, Lookup[meta, "Citation", sectionText[data["sections"], "citation"]]],
+        "ContentTypes",
+            If[ KeyExistsQ[meta, "ContentTypes"],
+                fillCheckbox["ContentTypes", asList @ meta["ContentTypes"], Lookup[data, "resourceType", "Data"]],
+                slotDefault[opts]
+            ],
+        "SubmissionNotes",
+            With[{sn = Lookup[meta, "SubmissionNotes", ""]},
+                If[sn === "", slotDefault[opts], fillTextCells[opts, sn]]
+            ],
         _, slotDefault[opts]
     ]
 ]
@@ -1154,7 +1184,7 @@ tableGridRow[cells_List, ncol_Integer, opts___] :=
    documentation stylesheets (Symbol / Guide / TechNote) and Default.nb do not
    define it, so a "TableNotes" cell renders unstyled / cramped there - switch to
    "Text" for those, which exists everywhere. *)
-$tableCellStyleFor := If[MemberQ[{"FunctionResource", "Paclet", "Example"}, $docTemplate], "TableNotes", "Text"]
+$tableCellStyleFor := If[MemberQ[{"FunctionResource", "Paclet", "Example", "Data"}, $docTemplate], "TableNotes", "Text"]
 
 (* a pipe table renders as a styled GridBox with horizontal row dividers, a bold
    header row, and a bit of padding. The grid options are repeated inline so the
@@ -1519,6 +1549,7 @@ resourceNotebook[resourceType_String, data0_] := Block[{template, data = Append[
 buildNotebook["FunctionResource", data_] := resourceNotebook["Function", data]
 buildNotebook["Paclet", data_] := resourceNotebook["Paclet", data]
 buildNotebook["Example", data_] := resourceNotebook["Example", data]
+buildNotebook["Data", data_] := resourceNotebook["Data", data]
 buildNotebook["Symbol", data_] := symbolNotebook[data]
 buildNotebook["Guide", data_] := guideNotebook[data]
 buildNotebook["TechNote", data_] := tutorialNotebook[data]
