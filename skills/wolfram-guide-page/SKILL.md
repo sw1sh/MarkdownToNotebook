@@ -14,6 +14,13 @@ https://github.com/sw1sh/AccessibleColors/blob/main/docs/Guides/AccessibleColors
 model new guides on it and read
 https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/doc-pages.md .
 
+Read first - the canonical guidelines (a guide page lives inside a paclet, so the
+Paclet Repository rules apply to it):
+
+- Paclet Repository, creating paclets: https://resources.wolframcloud.com/PacletRepository/creating-paclets
+- Paclet Repository, submission guidelines: https://resources.wolframcloud.com/PacletRepository/guidelines
+- Wolfram Language code style: https://github.com/sw1sh/MarkdownToNotebook/blob/main/GUIDE.md
+
 ## Frontmatter
 
 ```

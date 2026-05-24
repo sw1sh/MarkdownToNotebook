@@ -16,6 +16,13 @@ for the structure.
 A symbol page documents one symbol and belongs to a paclet (author the paclet with
 the `wolfram-paclet` skill, the guide with `wolfram-guide-page`).
 
+Read first - the canonical guidelines (a symbol ref page lives inside a paclet, so
+the Paclet Repository rules apply to it):
+
+- Paclet Repository, creating paclets: https://resources.wolframcloud.com/PacletRepository/creating-paclets
+- Paclet Repository, submission guidelines: https://resources.wolframcloud.com/PacletRepository/guidelines
+- Wolfram Language code style: https://github.com/sw1sh/MarkdownToNotebook/blob/main/GUIDE.md
+
 ## Frontmatter
 
 ```

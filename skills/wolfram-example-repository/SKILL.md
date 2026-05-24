@@ -20,6 +20,12 @@ https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/QuantumWalk.md - 
 read https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-notebooks.md
 (the "Example" section) for the slot-by-slot mapping.
 
+Read first - the canonical guidelines:
+
+- Example Repository submission guidelines: https://resources.wolframcloud.com/ExampleRepository/guidelines
+- Example Repository style guidelines (the rules a submission is reviewed against): https://resources.wolframcloud.com/ExampleRepository/style-guidelines
+- Wolfram Language code style: https://github.com/sw1sh/MarkdownToNotebook/blob/main/GUIDE.md
+
 ## Frontmatter
 
 Fence a `key: value` YAML header with `---` at the very top:

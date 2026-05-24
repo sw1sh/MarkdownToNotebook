@@ -18,6 +18,11 @@ https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-notebooks.md
 https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/resource-guidelines.md for
 the slot-by-slot mapping and the Function Repository style rules.
 
+Read first - the canonical guidelines:
+
+- Function Repository style guidelines (the rules a submission is reviewed against): https://resources.wolframcloud.com/FunctionRepository/style-guidelines
+- Wolfram Language code style (4-space indent, naming, plot colors, no `For` / `AppendTo`, ...): https://github.com/sw1sh/MarkdownToNotebook/blob/main/GUIDE.md
+
 ## Frontmatter
 
 Fence a `key: value` YAML header with `---` at the very top. The keys mirror the

@@ -19,6 +19,12 @@ symbol reference pages, tech notes) and a `PacletInfo.wl`. Author the pages with
 `wolfram-guide-page`, `wolfram-symbol-page`, and `wolfram-tech-note` skills; the
 metadata here must agree with `PacletInfo.wl`.
 
+Read first - the canonical guidelines:
+
+- Paclet Repository, creating paclets (the build, deploy and submit workflow): https://resources.wolframcloud.com/PacletRepository/creating-paclets
+- Paclet Repository, submission guidelines (the rules a paclet is reviewed against): https://resources.wolframcloud.com/PacletRepository/guidelines
+- Wolfram Language code style: https://github.com/sw1sh/MarkdownToNotebook/blob/main/GUIDE.md
+
 ## Frontmatter
 
 ```
