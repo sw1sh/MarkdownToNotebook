@@ -405,9 +405,19 @@ outputBoxes[res_, opts_] := Which[
    (the Hold keeps args unevaluated). The text is "head::tag: <StringForm template>";
    notebook-syntax math escapes are stripped so the cell reads as plain text rather
    than raw "\!\(...\)" glyphs. *)
-messageCell[Hold[Message[MessageName[head_, tag_String], ___], _]] := With[
-    {tmpl = MessageName[head, tag]},
-    Cell[SymbolName[head] <> "::" <> tag <> If[StringQ[tmpl], ": " <> tmpl, ""],
+(* The message template lives in Messages[head] as a rule "HoldPattern[MessageName[
+   head, tag]] :> template"; Replace pulls the template string out, and StringForm
+   substitutes the args (`1, `2, ...) so the rendered cell matches what the kernel
+   would print interactively. Falls back to "head::tag" alone if the template is not
+   yet registered (which happens for messages issued before their template loads). *)
+messageCell[Hold[Message[MessageName[head_, tag_String], args___], _]] := Module[
+    {tmpl, cleanedArgs, text},
+    tmpl = Replace[MessageName[head, tag], Messages[head]];
+    cleanedArgs = {args} /. HoldCompleteForm[x_] :> HoldForm[x];
+    text = If[StringQ[tmpl],
+        Quiet @ ToString[StringForm[tmpl, Sequence @@ cleanedArgs], OutputForm],
+        ""];
+    Cell[SymbolName[head] <> "::" <> tag <> If[text =!= "", ": " <> text, ""],
         "Message", "MSG"]
 ]
 messageCell[hf_] := Cell[ToString[hf, InputForm], "Message", "MSG"]
@@ -418,13 +428,15 @@ accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res,
     tmp = FileNameJoin[{$TemporaryDirectory, "mtnb-cell-" <> IntegerString[Hash[code], 36] <> ".wl"}];
     Export[tmp, b["Code"], "Text"];
     (* capture every issued message (Hold[Message[...], qFlag]) via the message hook;
-       Quiet still suppresses console printing. Only record messages whose head lives
-       in System` or the document's own context - Internal` / Developer` messages are
-       noise the user never sees in interactive use. *)
+       Quiet still suppresses console printing. Filters:
+         - drop Internal` / Developer` heads (system internals the user never sees);
+         - drop General::newsym (fires whenever WL auto-creates a fresh symbol, which
+           our private-context evaluation does for every assignment - pure noise). *)
     Internal`HandlerBlock[
         {"Message", Function[evt,
             If[MatchQ[evt, Hold[Message[MessageName[h_Symbol /;
-                    MatchQ[Context[h], "System`" | $docContext | "Global`"], _String], ___], _]],
+                        MatchQ[Context[h], "System`" | $docContext | "Global`"],
+                    tag_String /; ! MatchQ[tag, "newsym" | "shdw"]], ___], _]],
                 AppendTo[msgs, evt]];
             True]},
         res = Quiet @ Get[tmp]
