@@ -49,7 +49,7 @@ resolves this). `URI` is the page's `ref/` path.
   nested markdown inside it (links, italics, math) while rendering the whole
   span in code style:
 
-      <code>[`SymbolName`]()[$x_1$, $x_2$]</code> gives the foo, computed from $x_1$ and $x_2$.
+      <code>[SymbolName]()[$x_1$, $x_2$]</code> gives the foo, computed from $x_1$ and $x_2$.
 
   GitHub and Pandoc render this as a code-styled clickable link (the symbol's
   ref page), then literal brackets, then italic *x*₁, *x*₂. The converter
@@ -59,7 +59,7 @@ resolves this). `URI` is the page's `ref/` path.
   template-parser. Bare backtick / prose / hybrid forms still work as fallbacks.
 - `## Details & Options` - bullets become `Notes` cells; pipe tables become grids
   (use one for an options table). Link other symbols inline with
-  `<code>[`Symbol`]()</code>`. Two things matter here: the empty parens (without
+  `<code>[Symbol]()</code>`. Two things matter here: the empty parens (without
   them markdown viewers do not render the `[…]` as a link element), and the
   `<code>` wrapper (markdown forbids nested formatting inside backticked code
   spans, but processes markdown *inside* an inline HTML element - so the

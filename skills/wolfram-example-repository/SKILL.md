@@ -81,7 +81,7 @@ convention), one `key: value` per line: `eval: false` (show code without running
 points), `flag: future|excised|...`. Record an example's expected result in an
 `<!-- => ... -->` comment after the cell. Inline math is `$...$`. To link a
 documented symbol inline, wrap an inferred ref in `<code>`:
-`<code>[`Symbol`]()</code>` - the empty parens make markdown viewers render it as a
+`<code>[Symbol]()</code>` - the empty parens make markdown viewers render it as a
 clickable link, and the `<code>` wrapper applies code styling. The converter routes
 the empty-URL link through `linkInferred` to a `paclet:` ref; the twin rewrites it
 to the public web URL.

@@ -54,20 +54,17 @@ wallpaperGroups = <|
 |>;
 ```
 
-The resource stores the classification as primary content (so `$$Data` is the whole association) and the per-group lattice / point-group / orbifold fields as named content elements, fetched with [`ResourceData`](https://reference.wolfram.com/language/ref/ResourceData.html).
+The resource stores the classification as primary content (so `$$Data` is the whole association) and the per-group lattice / point-group / orbifold fields as named content elements, fetched with [ResourceData](https://reference.wolfram.com/language/ref/ResourceData.html).
 
 ```wl
-#| eval: False
 ResourceData[ResourceObject[EvaluationNotebook[]]] = wallpaperGroups
 ```
 
 ```wl
-#| eval: False
 ResourceData[ResourceObject[EvaluationNotebook[]], "ByLattice"] = GroupBy[Values[wallpaperGroups], #["Lattice"] &, Length]
 ```
 
 ```wl
-#| eval: False
 ResourceData[ResourceObject[EvaluationNotebook[]], "ByPointGroup"] = GroupBy[Values[wallpaperGroups], #["PointGroup"] &, Length]
 ```
 

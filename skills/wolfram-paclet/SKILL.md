@@ -59,7 +59,7 @@ categories** (do not invent names) - an empty group is a submission hint.
 ## Sections
 
 - `## Details & Options` - bullets become `Notes` cells; pipe tables become grids.
-- `## Usage` - the symbols the paclet provides, as `<code>[`Symbol`]()</code>`
+- `## Usage` - the symbols the paclet provides, as `<code>[Symbol]()</code>`
   inferred reference links (the `<code>` wrapper applies code styling, the empty
   parens make markdown viewers render it as a clickable link).
 - Example sections (`## Basic Examples`, `## Scope`, `## Applications`, ...) - one
@@ -74,7 +74,7 @@ categories** (do not invent names) - an empty group is a submission hint.
 
 `#|` lines at the top of a fenced `wl` cell: `eval`, `file`, `screenshot`, `tear`,
 `flag` (one `key: value` per line). Inline math is `$...$`; to link a documented
-symbol inline, wrap an inferred ref in `<code>`: `<code>[`Symbol`]()</code>`.
+symbol inline, wrap an inferred ref in `<code>`: `<code>[Symbol]()</code>`.
 
 ## Build and deploy
 

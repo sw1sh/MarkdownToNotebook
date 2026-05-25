@@ -14,7 +14,7 @@ Links: ["[Prime spirals](https://en.wikipedia.org/wiki/Ulam_spiral)"]
 
 The resource exposes one content element, `"Points"`: the polar coordinates
 $(p_n \cos n, p_n \sin n)$ for the first 200 primes $p_n$. Fetch it with
-[`ResourceData`]().
+[ResourceData]().
 
 ```wl
 ResourceData[ResourceObject[EvaluationNotebook[]], "Points"] = Table[{Prime[n] Cos[n], Prime[n] Sin[n]}, {n, 200}];

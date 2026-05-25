@@ -50,7 +50,7 @@ nested formatting (head as inferred link, args as math or italic) all renders, w
 the whole span gets code-styling from the `<code>` wrapper:
 
 ```
-<code>[`SymbolName`]()[$x_1$, $x_2$]</code> gives the foo, computed from $x_1$ and $x_2$.
+<code>[SymbolName]()[$x_1$, $x_2$]</code> gives the foo, computed from $x_1$ and $x_2$.
 ```
 
 Renders in pandoc / GitHub as a code-styled clickable link to the symbol's ref page,
@@ -106,21 +106,22 @@ to list, `DeleteObject` to clear).
 - Inline markdown links `[text](url)` -> `Hyperlink` `ButtonBox`, and
   `[sym](paclet:Pub/Name/ref/Sym)` -> a reference `Link` (palette *Link to URL*
   / *Custom URI*). **[done]**
-- Inferred-reference forms `` [`Symbol`]() `` and `` [`Symbol`]() `` -> a code-styled
-  `Link` button to the resolved `paclet:` URL in the notebook; in the `-out.md`
-  twin the same forms are expanded to the public HTTPS URL
-  (`reference.wolfram.com/language/ref/Symbol.html` for System symbols,
-  `resources.wolframcloud.com/PacletRepository/resources/Pub/Name/ref/Symbol` for
-  paclet ones), so GitHub renders them as clickable links. Unresolvable names and
-  non-paclet URLs are left untouched. **[done]**
+- Inferred-reference form `` [Symbol]() `` -> a code-styled `Link` button to the
+  resolved `paclet:` URL in the notebook; in the `-out.md` twin the same form
+  is expanded to the public HTTPS URL (`reference.wolfram.com/language/ref/Symbol.html`
+  for System symbols, `resources.wolframcloud.com/PacletRepository/resources/Pub/Name/ref/Symbol`
+  for paclet ones), so GitHub renders them as clickable links. The legacy
+  backtick-wrapped form `` [`Symbol`]() `` is recognised too but is redundant -
+  the backticks render nothing extra around an inferred link. Unresolvable
+  names and non-paclet URLs are left untouched. **[done]**
 - The pandoc / GitHub-friendly form for an inferred ref is to wrap it in `<code>`:
-  `<code>[`Symbol`]()</code>`. The empty parens are essential (without them
+  `<code>[Symbol]()</code>`. The empty parens are essential (without them
   markdown viewers do not render `[…]` as a link element), and the `<code>`
   wrapper applies code styling around it (markdown forbids nested formatting
   inside backticked code spans, but processes markdown *inside* an inline HTML
   element). The converter's inline `<code>` rule strips the wrapper and recurses
   on the inside, so the resulting notebook output is the same as a bare
-  `[`Symbol`]()` would produce. **[done]**
+  `[Symbol]()` would produce. **[done]**
 
 ## Structure  [done / partial]
 

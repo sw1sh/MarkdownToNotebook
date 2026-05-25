@@ -12,7 +12,7 @@ Links: ["[Prime spirals](https://en.wikipedia.org/wiki/Ulam_spiral)"]
 
 ## Content
 
-The resource exposes one content element, `"Points"`: the polar coordinates $(p_n \cos n, p_n \sin n)$ for the first 200 primes $p_n$. Fetch it with [`ResourceData`](https://reference.wolfram.com/language/ref/ResourceData.html).
+The resource exposes one content element, `"Points"`: the polar coordinates $(p_n \cos n, p_n \sin n)$ for the first 200 primes $p_n$. Fetch it with [ResourceData](https://reference.wolfram.com/language/ref/ResourceData.html).
 
 ```wl
 ResourceData[ResourceObject[EvaluationNotebook[]], "Points"] = Table[{Prime[n] Cos[n], Prime[n] Sin[n]}, {n, 200}];

@@ -96,6 +96,8 @@ docs/update-screenshots.wls` after changing the converter or the example docs.
 `"Evaluate" -> False` leaves example cells unevaluated, used by self-referential
 documents). The layout is the document's `Template` frontmatter; the optional
 second argument selects the result (`"Notebook"`, `"Association"`, a `.nb` file to
-write the notebook, or a `.md` file to write a rasterized markdown twin); example
+write the notebook, or a `.md` file to write a rendered markdown twin - the
+viewer-ready version with each evaluated output rasterized to an image, public
+HTTPS URLs in place of `paclet:` refs, and no `#|` cell options); example
 outputs are cached with the built-in persistence framework (`PersistentSymbol` at
 `"Local"`).

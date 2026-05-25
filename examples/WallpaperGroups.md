@@ -61,7 +61,7 @@ wallpaperGroups = <|
 
 The resource stores the classification as primary content (so `$$Data` is the whole
 association) and the per-group lattice / point-group / orbifold fields as named
-content elements, fetched with [`ResourceData`]().
+content elements, fetched with [ResourceData]().
 
 ```wl
 #| eval: false

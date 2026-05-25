@@ -182,7 +182,7 @@ links a System symbol, then a re-link pass wraps it again into
 `ButtonBox[ButtonBox[…]]`). So inline `` `code` `` is **never** linked, and a link
 only ever applies to backticked content:
 
-- `` [`Notebook`]() `` (or the empty-target form `` [`Notebook`]() ``) - a backtick
+- `` [Notebook]() `` (or the empty-target form `` [Notebook]() ``) - a backtick
   label with no real URL - infers the ref URL from the name (paclet context ->
   `paclet:Pub/Name/ref/Name`, System -> `paclet:ref/Name`) and renders a code-styled
   reference link. A bare `[Notebook]` with no backticks is **left as literal
@@ -193,7 +193,7 @@ only ever applies to backticked content:
   prose hyperlink (the author gave the URL, so it is intentional);
 - frontmatter lists (`SeeAlso`, `Links`, `RelatedGuides`) supply the rest.
 
-Order the `StringSplit` rules `[t](u)` **before** `` [`t`]() `` so the URL form wins.
+Order the `StringSplit` rules `[t](u)` **before** `` [t]() `` so the URL form wins.
 For a usage signature, still `stripLinks` (`//. ButtonBox[c_, ___] :> c`) the
 `ParseTextTemplate` output so its own eager System links are removed.
 
@@ -201,7 +201,7 @@ For a usage signature, still `stripLinks` (`//. ButtonBox[c_, ___] :> c`) the
 Inline markup (links, `` `code` ``, `*emphasis*`, `$math$`) only renders if the
 prose is built with `inlineTextData`, not the raw string. The `Default`
 style-map builder emitting `Cell[text, "Text"]` instead of
-`Cell[TextData @ inlineTextData[text], "Text"]` is why a `` [`Range`]() `` link (or
+`Cell[TextData @ inlineTextData[text], "Text"]` is why a `` [Range]() `` link (or
 any inline formatting) shows as literal text when converting a plain string with
 no frontmatter (which selects `Default`).
 

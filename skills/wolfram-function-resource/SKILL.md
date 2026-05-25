@@ -66,8 +66,8 @@ Always set `Categories` - an empty checkbox group is a submission hint.
   nested markdown inside it (links, italics, math) while rendering the whole
   span in code style:
 
-      <code>[`MyFunction`]()[*x*]</code> gives the foo.
-      <code>[`MyFunction`]()[$x_1$, $x_2$]</code> gives indexed-arg form.
+      <code>[MyFunction]()[*x*]</code> gives the foo.
+      <code>[MyFunction]()[$x_1$, $x_2$]</code> gives indexed-arg form.
 
   GitHub and Pandoc render this as a code-styled clickable link (the symbol's
   ref page), then literal brackets, then italic *x* (or *x*₁, *x*₂ via math).
@@ -98,7 +98,7 @@ convention), one `key: value` per line:
 To show a produced notebook as a thumbnail, return a `NotebookObject`
 (`NotebookPut[MarkdownToNotebook[...]]`); the converter rasterizes it. Inline math
 is `$...$`. To link a documented symbol inline, wrap an inferred ref in `<code>`:
-`<code>[`Symbol`]()</code>` - the empty parens make markdown viewers (pandoc, GitHub)
+`<code>[Symbol]()</code>` - the empty parens make markdown viewers (pandoc, GitHub)
 render it as a clickable link, and the `<code>` wrapper applies code styling around
 that link (markdown forbids nested formatting inside backticked code spans, but
 processes markdown *inside* an inline HTML element). The converter routes the

@@ -27,15 +27,13 @@ quantumWalk[n_] := Module[{hadamard = {{1, 1}, {1, -1}} / Sqrt[2], psi, step},
 ]
 ```
 
-The resource stores the full time evolution and the final distribution as content elements, fetched with [`ResourceData`](https://reference.wolfram.com/language/ref/ResourceData.html).
+The resource stores the full time evolution and the final distribution as content elements, fetched with [ResourceData](https://reference.wolfram.com/language/ref/ResourceData.html).
 
 ```wl
-#| eval: False
 ResourceData[ResourceObject[EvaluationNotebook[]], "TimeEvolution"] = quantumWalk[100]
 ```
 
 ```wl
-#| eval: False
 ResourceData[ResourceObject[EvaluationNotebook[]], "FinalDistribution"] = AssociationThread[Range[-100, 100] -> Last[quantumWalk[100]]]
 ```
 
