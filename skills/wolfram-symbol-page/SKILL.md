@@ -44,17 +44,19 @@ resolves this). `URI` is the page's `ref/` path.
 
 ## Sections
 
-- `## Usage` - one statement per paragraph. Markdown forbids nested formatting
-  inside code spans, so the pandoc-friendly form is a **backticked head + math
-  args**: `` `SymbolName`[$x_1$, $x_2$] gives ... `` - the head renders in code
-  style, the brackets render as text, and each `$x_i$` renders as inline math
-  (italic *x* with subscript *i*) in pandoc / GitHub. The converter recognises
-  this hybrid form, extracts the head and the bracket group, rewrites `$x_i$` to
-  the template form `x$i`, and feeds the reconstructed signature through
-  DocumentationTools' usage template-parser. A bare-prose form
-  (`SymbolName[$x_1$, $x_2$]`) and a legacy whole-signature backtick form
-  (`` `SymbolName[x~1~, x~2~]` ``) also work for the converter; the latter does
-  not render in pandoc / GitHub.
+- `## Usage` - one statement per paragraph. The canonical signature form wraps
+  the whole signature in an inline `<code>` tag so markdown viewers process the
+  nested markdown inside it (links, italics, math) while rendering the whole
+  span in code style:
+
+      <code>[`SymbolName`]()[$x_1$, $x_2$]</code> gives the foo, computed from $x_1$ and $x_2$.
+
+  GitHub and Pandoc render this as a code-styled clickable link (the symbol's
+  ref page), then literal brackets, then italic *x*₁, *x*₂. The converter
+  strips the `<code>` wrapper, peels the `[`Name`](…)` link down to the name,
+  drops `*…*` italics around args, and rewrites `$x_i$` to the template form
+  `x$i` before handing the reconstructed signature to DocumentationTools' usage
+  template-parser. Bare backtick / prose / hybrid forms still work as fallbacks.
 - `## Details & Options` - bullets become `Notes` cells; pipe tables become grids
   (use one for an options table). Link other symbols inline with `` [`Symbol`] ``.
 - `## Basic Examples` then the extended sections `## Scope`, `## Options`,

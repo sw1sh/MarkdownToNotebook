@@ -61,16 +61,20 @@ Always set `Categories` - an empty checkbox group is a submission hint.
   first line is `#| file: path` (resolved relative to the document), so the code
   keeps full IDE/lint support. The cell carries the `"DefaultContent"` cell tag the
   scraper needs - the converter handles that.
-- `## Usage` - one statement per paragraph. The pandoc-friendly form is a
-  **backticked head + math args**: `` `MyFunction`[$x$] gives ... `` for a single
-  arg, `` `MyFunction`[$x_1$, $x_2$] gives ... `` for indexed ones. The head
-  renders in code style, the brackets as text, and each `$x_i$` as inline math
-  (italic *x* with subscript *i*) in pandoc / GitHub. The converter recognises
-  this hybrid, extracts the head and bracket group, rewrites `$x_i$` to the
-  template form `x$i`, and feeds the reconstructed signature through the usage
-  template parser. A bare-prose form (`MyFunction[$x$]`) and a legacy whole-
-  signature backtick form (`` `MyFunction[x]` ``) also work for the converter;
-  the latter does not render in pandoc / GitHub.
+- `## Usage` - one statement per paragraph. The canonical signature form wraps
+  the whole signature in an inline `<code>` tag so markdown viewers process the
+  nested markdown inside it (links, italics, math) while rendering the whole
+  span in code style:
+
+      <code>[`MyFunction`]()[*x*]</code> gives the foo.
+      <code>[`MyFunction`]()[$x_1$, $x_2$]</code> gives indexed-arg form.
+
+  GitHub and Pandoc render this as a code-styled clickable link (the symbol's
+  ref page), then literal brackets, then italic *x* (or *x*₁, *x*₂ via math).
+  The converter strips the `<code>` wrapper, peels the `[`Name`](…)` link down
+  to the name, drops `*…*` italics around args, and rewrites `$x_i$` to the
+  template form `x$i` before handing the signature to the usage template
+  parser. Bare backtick / prose / hybrid forms still work as fallbacks.
 - `## Details & Options` - bullets, each becomes a `Notes` cell; a markdown pipe
   table becomes a `TableNotes` grid (use it for an options table).
 - Example sections, in order: `## Basic Examples` (start with the simplest use),

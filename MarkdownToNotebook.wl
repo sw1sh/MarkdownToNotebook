@@ -656,10 +656,28 @@ mathArgsToTemplate[s_String] := StringReplace[s, {
     "$" ~~ ident:(LetterCharacter ~~ (WordCharacter ...)) ~~ "$" :> ident
 }]
 
+(* Sanitize the markdown styling out of a usage signature, leaving the plain WL
+   signature string that templateBox / ParseTextTemplate can render. Strips
+   inferred-link wrappers ("[`Name`](url)" -> "Name") and "*italic*" markers; the
+   "$x_i$" math and "<sub>i</sub>" / "~i~" subscript forms pass through to
+   mathArgsToTemplate / mdToTemplateSubs which already know how to template them. *)
+unwrapMarkdownSig[s_String] := StringReplace[s, {
+    "[`" ~~ n:Shortest[Except["`"]..] ~~ "`](" ~~ Shortest[Except[")"]...] ~~ ")" :> n,
+    "*" ~~ w:Shortest[Except["*"|" "]..] ~~ "*" :> w
+}]
+
 usageStatement[text_String] := Block[{trimmed = StringTrim[text], m},
+    (* the canonical wrapper: <code>...</code>. GitHub / Pandoc process markdown
+       *inside* an inline HTML tag, so the inferred-link head, italic args, math
+       subscripts, etc. all render naturally while the whole span is code-styled.
+       Strip the code wrapper and the inner markdown to recover the plain WL
+       signature; the templateBox / ParseTextTemplate pipeline does the rest. *)
+    m = StringCases[trimmed,
+        StartOfString ~~ "<code>" ~~ sig : Shortest[__] ~~ "</code>" ~~ rest___ :>
+            {mathArgsToTemplate[unwrapMarkdownSig[sig]], StringTrim[rest]}, 1];
+    If[m =!= {}, Return[m]];
     (* hybrid form (pandoc-friendly): a backticked head followed *immediately* by a
-       "[...]" bracket group whose args use inline math. Backticks render the head in
-       code style; the args render as math; both work in every markdown viewer. *)
+       "[...]" bracket group whose args use inline math. *)
     m = StringCases[trimmed,
         StartOfString ~~ "`" ~~ name : Shortest[Except["`"] ..] ~~ "`" ~~ args : ("[" ~~ Shortest[Except["\n"] ..] ~~ "]") ~~ rest___ :>
             {name <> mathArgsToTemplate[args], StringTrim[rest]}, 1];

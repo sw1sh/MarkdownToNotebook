@@ -44,19 +44,21 @@ shorthand needs the `subscript` / `superscript` extension, which not every flavo
 turns on. Neither form renders inside a markdown code span, because markdown forbids
 nested formatting there.
 
-A `## Usage` signature should therefore be written in prose with inline-math arguments
-- the only form that renders correctly in pandoc / GitHub *and* the converter:
+A `## Usage` signature should therefore be written wrapped in an inline `<code>`
+tag - GitHub and Pandoc *do* process markdown inside an inline HTML element, so the
+nested formatting (head as inferred link, args as math or italic) all renders, while
+the whole span gets code-styling from the `<code>` wrapper:
 
 ```
-SymbolName[$x_1$, $x_2$] gives the foo, computed from $x_1$ and $x_2$.
+<code>[`SymbolName`]()[$x_1$, $x_2$]</code> gives the foo, computed from $x_1$ and $x_2$.
 ```
 
-Pandoc and GitHub render each `$x_i$` as inline TeX math (italic *x*ᵢ); the converter
-extracts the signature head + bracket group, rewrites each `$x_i$` to the
-`ParseTextTemplate` form `x$i`, and feeds the reconstructed `SymbolName[x$1, x$2]`
-through the usage template parser so the notebook gets the same italic, subscripted
-arguments. A legacy backtick-wrapped signature (`` `SymbolName[x~1~, x~2~]` ``) still
-works for the converter but does not render in pandoc / GitHub.
+Renders in pandoc / GitHub as a code-styled clickable link to the symbol's ref page,
+then literal brackets with italic *x*₁, *x*₂ from the inline math. The converter
+strips the `<code>` wrapper, peels the `[`Name`](…)` link down to the name, drops
+`*…*` italics around args, and rewrites each `$x_i$` to the template form `x$i`
+before handing the signature to `ParseTextTemplate`. Bare backtick forms (`` `f[x]` ``,
+`` `f`[$x$] ``, plain `f[$x$]`) still work for the converter as fallbacks.
 
 ## Code cells  [done]
 
