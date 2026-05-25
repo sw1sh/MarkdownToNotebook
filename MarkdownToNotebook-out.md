@@ -15,7 +15,61 @@ This document is the source of truth for the resource function it describes. The
 
 ## Definition
 
-The implementation lives in a separate `.wl` file so it has full IDE and lint support. The cell below inlines it at conversion time via the `file` option, a general mechanism: any code cell with `#| file: path` is replaced by the contents of that local file or URL, resolved relative to this document.
+The implementation lives across three plain `.wl` files - a tiny shared module that defines the stash protocol used by both this function and its inverse ([NotebookToMarkdown](https://github.com/sw1sh/MarkdownToNotebook/blob/main/NotebookToMarkdown.md)), and the main forward converter. Each cell below inlines one file at conversion time via the `file` option, a general mechanism: any code cell with `#| file: path` is replaced by the contents of that local file or URL, resolved relative to this document. The deployed resource therefore carries both files inline.
+
+```wl
+(* MarkdownTools - the tiny shared library used by both MarkdownToNotebook
+   (the forward converter, markdown -> notebook) and NotebookToMarkdown (the
+   inverse, notebook -> markdown). At the moment it carries one thing - the
+   stash protocol that lets a notebook MarkdownToNotebook produced carry the
+   original source markdown in its TaggingRules so the inverse can recover it
+   verbatim (round-trip without a cell walker). Both converters Get this file
+   in so the stash key and read/write helpers stay in agreement; either
+   resource can be loaded on its own.
+
+   Deliberately plain top-level definitions (no BeginPackage), the same shape
+   as both consumers, so a resource definition notebook can inline this file
+   with a "#| file: MarkdownTools.wl" cell and have it work on Get. *)
+
+(* Single source of truth for the TaggingRules key the stash lives under. *)
+$markdownSourceKey = "MarkdownToNotebook"
+
+(* Forward direction: stamp a notebook with the original markdown source and
+   chosen template name. The forward converter calls this once at the end of
+   its build pipeline, so every notebook this code base produces is self-
+   contained (the rendered view + the source it came from in one file).
+   Merges with existing TaggingRules - the Symbol/Guide path already writes a
+   "Metadata" entry, and we add ours alongside without clobbering it. *)
+withMarkdownSource[Notebook[cells_, o : OptionsPattern[]], src_String, tmpl_String] := Block[
+    {oldRules = Lookup[{o}, TaggingRules, {}], newEntry},
+    newEntry = $markdownSourceKey -> <|"Source" -> src, "Template" -> tmpl|>;
+    Notebook[cells,
+        TaggingRules -> If[ListQ[oldRules],
+            Append[DeleteCases[oldRules, $markdownSourceKey -> _], newEntry],
+            {newEntry}
+        ],
+        Sequence @@ FilterRules[{o}, Except[TaggingRules]]
+    ]
+]
+withMarkdownSource[other_, _, _] := other
+
+(* Inverse direction: given a notebook (or its option sequence), return the
+   stashed entry as <|"Source" -> ..., "Template" -> ...|>, or a Missing[...]
+   that says why the lookup failed. Callers test AssociationQ on the result.
+   Implemented through `Replace[key, rules]` (no third argument - that is a
+   level spec; a literal default would crash the call when it is an association)
+   and then a fallback for the no-match case where Replace returns the key
+   itself. *)
+markdownSourceOf[Notebook[_, o : OptionsPattern[]]] := markdownSourceOf[{o}]
+markdownSourceOf[opts_List] := Block[{tr = Lookup[opts, TaggingRules, {}], hit},
+    If[ListQ[tr],
+        hit = Replace[$markdownSourceKey, tr];
+        If[hit === $markdownSourceKey, Missing["KeyAbsent", $markdownSourceKey], hit],
+        Missing["NoTaggingRules"]
+    ]
+]
+markdownSourceOf[_] := Missing["NoSource"]
+```
 
 ```wl
 (* MarkdownToNotebook - convert a literate-markdown document into a Wolfram
@@ -36,6 +90,12 @@ The implementation lives in a separate `.wl` file so it has full IDE and lint su
    document cannot clobber the live definition doing the converting. *)
 
 Needs["GeneralUtilities`"]
+
+(* Pull in the shared TaggingRules stash protocol from the sibling
+   MarkdownTools.wl. Quiet'd so a deployed resource notebook (which inlines
+   MarkdownTools.wl as a separate "## Definition" cell that runs first) does
+   not fire Get::noopen when there is no file on disk to load. *)
+Quiet @ Get[FileNameJoin[{Directory[], "MarkdownTools.wl"}]]
 
 mdSep = "\n(*--cell--*)\n"
 
@@ -168,9 +228,16 @@ taskCheckbox[t_String] := Which[
 orderedItemQ[line_String] := StringMatchQ[StringTrim[line], DigitCharacter .. ~~ ("." | ")") ~~ " " ~~ ___]
 orderedText[line_String] := StringTrim @ StringReplace[StringTrim[line], StartOfString ~~ DigitCharacter .. ~~ ("." | ")") ~~ " " -> ""]
 orderedSplit[{}, collected_] := {Reverse[collected], {}}
-orderedSplit[lines_List, collected_] := If[ orderedItemQ[First[lines]],
-    orderedSplit[Rest[lines], Prepend[collected, orderedText[First[lines]]]],
-    {Reverse[collected], lines}
+orderedSplit[lines_List, collected_] := With[{line = First[lines]},
+    Which[
+        orderedItemQ[line],
+            orderedSplit[Rest[lines], Prepend[collected, orderedText[line]]],
+        collected =!= {} && listContinuationQ[line],
+            orderedSplit[Rest[lines],
+                Prepend[Rest[collected], First[collected] <> " " <> StringTrim[line]]],
+        True,
+            {Reverse[collected], lines}
+    ]
 ]
 
 (* a "$$ ... $$" line (or a "$$"-fenced block across multiple lines) is display math.
@@ -216,10 +283,33 @@ separatorQ[line_String] := Block[{chars = Characters[StringTrim[line]]},
     Length[chars] >= 3 && MemberQ[{"-", "_", "*"}, First[chars, ""]] && Length[DeleteDuplicates[chars]] === 1
 ]
 
+(* a continuation line under a list item: any non-empty, non-marker-starting
+   line that does not itself open a new block. Standard markdown indents the
+   continuation under the bullet's text column (2-4 spaces); we accept any
+   leading whitespace and fall back to a plain non-list line, so wrapped
+   prose under a bullet folds into the same item instead of breaking the list
+   into "one item + a paragraph + another item + a paragraph + ..." (which is
+   what the user sees as "6 bullets instead of 3"). *)
+listContinuationQ[line_String] := StringLength[line] > 0 &&
+    StringStartsQ[line, " " | "\t"] && StringTrim[line] =!= "" &&
+    ! listItemQ[line] && ! orderedItemQ[line] && ! headingQ[line] &&
+    ! fenceQ[line] && ! blockquoteQ[line] && ! mathBlockOpenQ[line]
+
+(* collect a markdown list, folding indented continuation lines into the
+   current item (joined with a single space, the way a CommonMark renderer
+   would). `collected` is built in reverse - the first element is the current
+   item being extended, so prepending a new item makes that the new "current". *)
 listSplit[{}, collected_] := {Reverse[collected], {}}
-listSplit[lines_List, collected_] := If[ listItemQ[First[lines]],
-    listSplit[Rest[lines], Prepend[collected, listText[First[lines]]]],
-    {Reverse[collected], lines}
+listSplit[lines_List, collected_] := With[{line = First[lines]},
+    Which[
+        listItemQ[line],
+            listSplit[Rest[lines], Prepend[collected, listText[line]]],
+        collected =!= {} && listContinuationQ[line],
+            listSplit[Rest[lines],
+                Prepend[Rest[collected], First[collected] <> " " <> StringTrim[line]]],
+        True,
+            {Reverse[collected], lines}
+    ]
 ]
 
 (* GitHub-flavored tables: a "| a | b |" row whose next line is a "|---|---|"
@@ -394,8 +484,14 @@ If[! ValueQ[$lightDark], $lightDark = "Light"]
 If[! ValueQ[$convertDepth], $convertDepth = 0]
 
 (* the notebook a result stands for (a Notebook expression, or the open notebook of
-   a NotebookObject), pinned to the current mode. *)
-resultNotebook[res_] := Append[If[Head[res] === NotebookObject, NotebookGet[res], res], LightDark -> $lightDark]
+   a NotebookObject), pinned to the current mode. The Resource templates
+   (FunctionResource / Example / Data) come from DefinitionNotebookClient with
+   LightDark -> "Light" already baked in; appending a second LightDark would
+   leave both in the option sequence and the front end would honour the first
+   (Light) one, so strip any existing LightDark before setting ours. *)
+resultNotebook[res_] := Block[{nb = If[Head[res] === NotebookObject, NotebookGet[res], res]},
+    nb /. Notebook[c_, o___] :> Notebook[c, Sequence @@ DeleteCases[{o}, LightDark -> _], LightDark -> $lightDark]
+]
 
 (* output for an evaluated cell. A whole notebook has no faithful inline form -
    inlining its cells breaks the surrounding layout (a Title/Section renders
@@ -420,61 +516,43 @@ outputBoxes[res_, opts_] := Which[
     True, ToBoxes[res]
 ]
 
-(* a captured message -> a notebook "Message" cell. Internal`HandlerBlock["Message"]
-   passes "Hold[Message[head::tag, args], qFlag]" to the handler; we store it as-is
-   (the Hold keeps args unevaluated). The text is "head::tag: <StringForm template>";
-   notebook-syntax math escapes are stripped so the cell reads as plain text rather
-   than raw "\!\(...\)" glyphs. *)
-(* Render a captured message as the exact "MessageTemplate" TemplateBox the front end
-   produces interactively: TemplateBox[{<formatted-text-boxes>, "head", "tag",
-   Hold[args]}, "MessageTemplate"]. The template lives in Messages[head] as a rule
-   "HoldPattern[MessageName[head, tag]] :> template"; Replace pulls it out, StringForm
-   substitutes the args (`1, `2, ...) preserved as HoldForm so the typeset boxes show
-   the original "1/0" rather than the post-evaluation ComplexInfinity, and ToBoxes
-   converts the StringForm to the InterpretationBox the FE expects. Falls back to a
-   plain "head::tag" text cell if the template is not yet registered. *)
-messageCell[Hold[Message[MessageName[head_, tag_String], args___], _]] := Module[
-    {tmpl, cleanedArgs, formattedBoxes},
-    tmpl = Replace[MessageName[head, tag], Messages[head]];
-    If[ ! StringQ[tmpl],
-        Return @ Cell[SymbolName[head] <> "::" <> tag, "Message", "MSG"]
-    ];
-    cleanedArgs = {args} /. HoldCompleteForm[x_] :> HoldForm[x];
-    (* ToBoxes[StringForm[...]] wraps in InterpretationBox; strip that to expose the
-       raw rendered string with its inline "\!\(...\)" typeset markup, which is the
-       form the front end parses to render math (FractionBox, etc.) in the message
-       cell exactly the way the kernel prints it interactively. *)
-    formattedBoxes = ToBoxes[StringForm[tmpl, Sequence @@ cleanedArgs]] /. InterpretationBox[b_, ___] :> b;
-    Cell[BoxData @ TemplateBox[
-        {formattedBoxes, SymbolName[head], tag, Hold[args]},
-        "MessageTemplate"
-    ], "Message", "MSG"]
-]
+(* a captured message string -> a notebook "Message" cell. captureMessages
+   redirects $Messages to a write stream and we read the printed text back
+   verbatim, so the cell text is exactly the line the kernel itself printed -
+   no template lookup, no arg substitution to redo. *)
+messageCell[s_String] := Cell[s, "Message", "MSG"]
 messageCell[hf_] := Cell[ToString[hf, InputForm], "Message", "MSG"]
 
-(* Keep only messages whose head lives in user-visible contexts. Internal` /
-   Developer` chatter never reaches an interactive user, so it should never reach
-   our message cells either. *)
-keepMessageQ[Hold[Message[MessageName[h_Symbol, _String], ___], _]] :=
-    MatchQ[Context[h], "System`" | $docContext | "Global`"]
-keepMessageQ[_] := False
+(* Plain-text rendering of a captured message for the markdown twin: just a
+   blockquote with each line prefixed. The message text is whatever the kernel
+   itself would print to $Messages, so what shows up is exactly what an
+   interactive user would see fire for that cell. *)
+messageMd[s_String] := "> " <> StringReplace[StringTrim[s], "\n" -> "\n> "]
+messageMd[_] := ""
 
-messageNameOf[Hold[Message[name_, ___], _]] := ToString[name, InputForm]
-messageNameOf[_] := ""
-
-(* WithMessageHandler [ResourceFunction] is the obvious choice and is itself a thin
-   wrapper around Internal`HandlerBlock[{"Message", Failure-wrapper}, Quiet[body]];
-   in a headless wolframscript its handler argument does not fire reliably for any
-   form other than "Function[Global`m = #]" (so it can only capture the LAST message,
-   not the full sequence). The version below is the same Internal`HandlerBlock idiom
-   inline, with state accumulated through a Block-local list which IS reliably
-   visible to the closure-bound handler. *)
-captureMessages[expr_] := Block[{msgs = {}, res},
-    Internal`HandlerBlock[
-        {"Message", Function[evt, If[keepMessageQ[evt], AppendTo[msgs, evt]]; True]},
-        res = Quiet @ expr
-    ];
-    {res, DeleteDuplicatesBy[msgs, messageNameOf]}
+(* Capture the messages the kernel would *print* during evaluation, by
+   redirecting $Messages to a private write stream. This is the proper fix
+   for the "ton of garbage in the twin" problem - Internal`HandlerBlock
+   captures every fired message, including the 50k OptionValue::optnf and
+   General::newsym Wolfram's own framework fires per Plot and which the
+   kernel's normal message printer silently swallows (most of them have
+   $Off-style suppression, are inside an Internal`InheritedBlock[{$Off}, ...]
+   in Charting, or hit General::stop). Redirecting the print stream is the
+   *one* mechanism that respects all of those: whatever the kernel decides
+   to actually print, we capture verbatim. *)
+captureMessages[expr_] := Module[{tmp, stream, res, txt, msgs},
+    tmp = FileNameJoin[{$TemporaryDirectory,
+        "mtnb-msg-" <> IntegerString[$KernelID, 36] <> "-" <>
+        IntegerString[RandomInteger[10^9], 36] <> ".txt"}];
+    stream = OpenWrite[tmp];
+    res = Block[{$Messages = {stream}}, expr];
+    Close[stream];
+    txt = If[FileExistsQ[tmp], Quiet @ Import[tmp, "Text"], ""];
+    Quiet @ DeleteFile[tmp];
+    msgs = If[StringQ[txt] && StringTrim[txt] =!= "",
+        DeleteCases[Map[StringTrim, StringSplit[txt, "\n\n"]], ""],
+        {}];
+    {res, msgs}
 ]
 SetAttributes[captureMessages, HoldFirst]
 
@@ -739,6 +817,78 @@ contentSlot[opts_, sections_] := Block[{cells = Cases[Lookup[sections, "content"
     ]
 ]
 
+(* === single-cell-from-section helpers, used by Prompt and Demonstration ===
+   Each fills a TemplateSlot with one cell built from the FIRST code block (or
+   prose block) of a given markdown section. They mirror contentSlot's pattern
+   but for slots that take a single value rather than a list, and tag the cell
+   with "DefaultContent" so the resource scraper picks it up. *)
+
+(* Pull the first executable WL block from a section, or Missing[] if none. *)
+firstCodeOf[sections_, key_] := FirstCase[Lookup[sections, key, {}], b_ /; codeBlockQ[b], Missing[]]
+
+(* All executable WL blocks in a section, in order. *)
+allCodeOf[sections_, key_] := Cases[Lookup[sections, key, {}], b_ /; codeBlockQ[b]]
+
+(* All prose / list / quote / table blocks of a section, in order, as ordinary
+   Text cells - the format the Demonstration template's Caption / Details /
+   References slots expect. *)
+proseBlockCells[blocks_, style_String : "Text"] := Catenate @ Map[
+    b |-> Switch[b["Type"],
+        "Prose", {Cell[TextData @ inlineTextData[b["Text"]], style]},
+        "List",  listItemCells[b, style],
+        "Table", {tableCell[b]},
+        "Quote", {quoteCell[b["Text"]]},
+        "MathBlock", {mathBlockCell[b["Text"]]},
+        _, {}
+    ],
+    blocks
+]
+
+(* Fill a slot with a single Input cell built from the first code block of the
+   named section; falls back to the template default if the section is empty.
+   The cell carries "DefaultContent" so the official scraper finds it. *)
+codeSlot[opts_, sections_, key_String] := Block[{b = firstCodeOf[sections, key]},
+    If[ MissingQ[b],
+        slotDefault[opts],
+        {Cell[BoxData[inputBoxes[b["Code"]]], "Input", CellTags -> {"DefaultContent"}]}
+    ]
+]
+
+(* Fill a slot with one Input cell per code block of the named section. Used for
+   Snapshot groups (>= 3 panel-producing inputs) and similar list-of-cells slots. *)
+multiCodeSlot[opts_, sections_, key_String] := Block[{cells = allCodeOf[sections, key]},
+    If[ cells === {},
+        slotDefault[opts],
+        Map[Cell[BoxData[inputBoxes[#["Code"]]], "Input", CellTags -> {"DefaultContent"}] &, cells]
+    ]
+]
+
+(* Fill a slot with one Text (or other styled) cell per prose / list / quote
+   block of the named section. Used for CaptionCells / DetailCells /
+   ReferenceCells in the Demonstration template, and PromptTemplate in the
+   Prompt template (whose body is plain prose). *)
+proseSectionSlot[opts_, sections_, key_String, style_String : "Text"] := Block[{cells},
+    cells = proseBlockCells[Lookup[sections, key, {}], style];
+    If[cells === {}, slotDefault[opts], cells]
+]
+
+(* A Manipulate slot needs the Input cell AND its evaluated Manipulate output
+   (the live panel), grouped so the published demo shows the panel. The cached
+   OutputBoxes from the example-evaluation pass provide the output; without it
+   we leave the Input alone and let the front end produce the output on open. *)
+manipulateSlot[opts_, sections_] := Block[{b = firstCodeOf[sections, "manipulate"]},
+    If[ MissingQ[b], Return[slotDefault[opts]] ];
+    Block[{out = Lookup[b, "OutputBoxes", Missing[]]},
+        If[ MissingQ[out] || out === Null,
+            {Cell[BoxData[inputBoxes[b["Code"]]], "Input", CellTags -> {"DefaultContent"}]},
+            {Cell[CellGroupData[{
+                Cell[BoxData[inputBoxes[b["Code"]]], "Input", CellTags -> {"DefaultContent"}],
+                Cell[BoxData[out], "Output"]
+            }, Open]]}
+        ]
+    ]
+]
+
 (* a Usage section is a sequence of usage statements, one per prose paragraph
    that begins with a `code` span: the code is the signature (e.g.
    `MarkdownToNotebook[source]`) and the rest is its description. The signature
@@ -758,12 +908,16 @@ mathArgsToTemplate[s_String] := StringReplace[s, {
 
 (* Sanitize the markdown styling out of a usage signature, leaving the plain WL
    signature string that templateBox / ParseTextTemplate can render. Strips
-   inferred-link wrappers ("[`Name`](url)" -> "Name") and "*italic*" markers; the
+   inferred-link wrappers in both forms - the canonical bare "[Name](url)" and
+   the legacy backtick-wrapped "[`Name`](url)" - and "*italic*" markers. The
    "$x_i$" math and "<sub>i</sub>" / "~i~" subscript forms pass through to
-   mathArgsToTemplate / mdToTemplateSubs which already know how to template them. *)
+   mathArgsToTemplate / mdToTemplateSubs which already know how to template
+   them. The backticked rule runs first so a "[`X`](url)" does not part-match
+   the bare rule and leak its surrounding backticks. *)
 unwrapMarkdownSig[s_String] := StringReplace[s, {
-    "[`" ~~ n:Shortest[Except["`"]..] ~~ "`](" ~~ Shortest[Except[")"]...] ~~ ")" :> n,
-    "*" ~~ w:Shortest[Except["*"|" "]..] ~~ "*" :> w
+    "[`" ~~ n : Shortest[Except["`"] ..] ~~ "`](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
+    "[" ~~ n : Shortest[Except["]" | "`" | "\n"] ..] ~~ "](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
+    "*" ~~ w : Shortest[Except["*" | " "] ..] ~~ "*" :> w
 }]
 
 usageStatement[text_String] := Block[{trimmed = StringTrim[text], m},
@@ -859,6 +1013,24 @@ heroSlot[opts_, sections_] := Block[{cells = sectionCells[sections, "hero image"
         Cell[BoxData[inputBoxes[code]], "Input"],
         Cell[BoxData[out], "Output"]
     }, {2}]]}
+]
+
+(* The FunctionResource template's VerificationTests slot accepts both Input /
+   Output cell pairs and symbolic VerificationTest expressions. We always emit
+   the explicit VerificationTest form: each wl code block in a "## Tests"
+   section is expected to be a `VerificationTest[code, expected, TestID -> "..."]`
+   expression (the docked Run Tests button evaluates these directly), so the
+   slot just wraps each code block as a single Input cell tagged
+   DefaultContent. Authors write the assertion explicitly - what is tested
+   and what is expected - rather than relying on an Input/Output pair the
+   scraper would otherwise infer the assertion from. *)
+testsSlot[opts_, sections_] := Block[
+    {cells = Cases[Lookup[sections, "tests", {}], b_ /; codeBlockQ[b]]},
+    If[ cells === {}, Return[slotDefault[opts]] ];
+    Map[
+        Cell[BoxData[inputBoxes[#["Code"]]], "Input", CellTags -> {"DefaultContent"}] &,
+        cells
+    ]
 ]
 
 examplesSlot[opts_, sections_] := Block[{keys, body},
@@ -999,6 +1171,7 @@ fillSlot[name_, opts_, data_] := Block[{meta = data["meta"]},
         "PrimaryContext", fillTextCells[opts, Lookup[meta, "Context", ""]],
         "Examples", examplesSlot[opts, data["sections"]],
         "ExampleNotebook", exampleNotebookSlot[opts, data["sections"]],
+        "VerificationTests", testsSlot[opts, data["sections"]],
         "Author Notes",
             With[{an = sectionText[data["sections"], "author notes"]},
                 If[an === "", slotDefault[opts], {cleanCell @ ReplacePart[First[slotDefault[opts]], 1 -> an]}]
@@ -1030,6 +1203,44 @@ fillSlot[name_, opts_, data_] := Block[{meta = data["meta"]},
         "SubmissionNotes",
             With[{sn = Lookup[meta, "SubmissionNotes", ""]},
                 If[sn === "", slotDefault[opts], fillTextCells[opts, sn]]
+            ],
+        (* === Prompt Repository slots ===
+           PromptTemplate is the prompt body (a "## Prompt" section of plain prose).
+           The optional WL slots (PersonaIcon, CellProcessingFunction, ...) pull
+           the first code block of the matching section into the template's input
+           cell. SampleChat / Examples / Notes / Usage reuse the existing helpers. *)
+        "PromptTemplate", proseSectionSlot[opts, data["sections"], "prompt", "Text"],
+        "PersonaIcon", codeSlot[opts, data["sections"], "persona icon"],
+        "CellProcessingFunction", codeSlot[opts, data["sections"], "cell processing function"],
+        "CellPostEvaluationFunction", codeSlot[opts, data["sections"], "cell post evaluation function"],
+        "PromptInterpreter", codeSlot[opts, data["sections"], "output interpreter"],
+        "Tools", codeSlot[opts, data["sections"], "llm tools"],
+        "LLMConfigurationExtra", codeSlot[opts, data["sections"], "llm configuration"],
+        "SampleChat", multiCodeSlot[opts, data["sections"], "chat examples"],
+        "Topics", fillListCells[opts, asList @ Lookup[meta, "Topics", {}]],
+        (* === Demonstration slots ===
+           A Demonstration's content is split across named sections rather than the
+           Function template's TemplateSlots: Caption / Initialization / Manipulate /
+           Snapshots / Details / References each map to one slot. AuthorNames takes
+           a frontmatter list (one cell per author item, falling back to ContributedBy
+           for the common single-author case). RelatedDemonstrations is the
+           "see also" of other Demos. *)
+        "CaptionCells", proseSectionSlot[opts, data["sections"], "caption", "Text"],
+        "InitializationCode", codeSlot[opts, data["sections"], "initialization"],
+        "ManipulateGroup", manipulateSlot[opts, data["sections"]],
+        "SnapshotGroup", multiCodeSlot[opts, data["sections"], "snapshots"],
+        "AuthorNames",
+            With[{vs = asList @ Lookup[meta, "AuthorNames", Lookup[meta, "ContributedBy", ""]]},
+                fillListCells[opts, DeleteCases[vs, ""]]
+            ],
+        "DetailCells", proseSectionSlot[opts, data["sections"], "details", "Text"],
+        "ReferenceCells", proseSectionSlot[opts, data["sections"], "references", "Text"],
+        "RelatedDemonstrations", fillListCells[opts, asList @ Lookup[meta, "RelatedDemonstrations", {}]],
+        "ExternalLinks", fillLinkCells[opts, asList @ Lookup[meta, "Links", {}]],
+        "CompatibilityARSupport",
+            If[ KeyExistsQ[meta, "ARSupport"],
+                fillCheckbox["CompatibilityARSupport", If[TrueQ @ meta["ARSupport"], {True}, {}]],
+                slotDefault[opts]
             ],
         _, slotDefault[opts]
     ]
@@ -1144,6 +1355,31 @@ templateBox[code_String] := Block[{boxes, prepped = mdToTemplateSubs[StringTrim[
         boxes,
         inputBoxes[prepped]
     ]
+]
+
+(* A "<code>...</code>" span: strip the markdown link / italic wrappers in the
+   inner signature, run it through the same templateBox pipeline a Usage
+   signature uses (italic args via ParseTextTemplate), and wrap the result in
+   a single InlineFormula cell so the code styling covers the whole span -
+   brackets included - and not just the linked head. The leading head is
+   wrapped in a paclet-link ButtonBox via inferURL when the name resolves
+   (in $docContext or System`); ParseTextTemplate by itself does not link a
+   page's own symbol, but a "<code>[Self]()</code>" reference should still
+   render as a tappable link to the symbol's own ref page. *)
+codeInlineCell[inner_String] := Block[{sig, head, url, boxes},
+    sig = mathArgsToTemplate @ unwrapMarkdownSig @ inner;
+    head = First[StringCases[sig,
+        StartOfString ~~ h : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) :> h, 1], ""];
+    url = If[head =!= "", inferURL[head], None];
+    boxes = templateBox[sig];
+    If[ url =!= None,
+        boxes = Replace[boxes, {
+            s_String /; s === head :> ButtonBox[s, BaseStyle -> "Link", ButtonData -> url],
+            RowBox[{s_String /; s === head, rest___}] :>
+                RowBox[{ButtonBox[s, BaseStyle -> "Link", ButtonData -> url], rest}]
+        }]
+    ];
+    Cell[BoxData @ boxes, "InlineFormula"]
 ]
 
 symbolInContextQ[name_String, ctx_String] := ctx =!= "" &&
@@ -1369,15 +1605,17 @@ inlineTextData[text_String] := Replace[
             (* a backslashed ASCII punctuation is that literal char (so \* is not
                emphasis); listed first so the escape wins before the marker rules. *)
             "\\" ~~ c : PunctuationCharacter :> c,
-            (* "<code>...</code>" - an inline-HTML wrapper whose inside is parsed
-               markdown. Pandoc / GitHub use it to apply code styling to the whole
-               span (which is the only way to render a `[link]()` or italic inside
-               an inline-code region in markdown); our notebook output does not need
-               the extra styling because the inner elements (linkInferred / templated
-               math) are already InlineFormula cells, so just strip the wrapper and
-               recurse on the inside. Usage signatures get the special templating in
-               usageStatement before this rule ever fires. *)
-            "<code>" ~~ inner : Shortest[__] ~~ "</code>" :> Sequence @@ inlineTextData[inner],
+            (* "<code>...</code>" - the canonical inline-HTML wrapper for a code-styled
+               span that may contain a markdown link and italic args inside. Pandoc /
+               GitHub use it because markdown forbids nested formatting inside a
+               backticked code span. The whole inner span is rendered as a single
+               InlineFormula cell so the code styling wraps everything - the linked
+               head AND the surrounding brackets AND the italic args - not just the
+               linked head; the previous strip-and-recurse left the brackets and
+               args as plain text in the surrounding TextData. The signature is fed
+               through templateBox (the same pipeline usageStatement uses), so a
+               head in $docContext or System` gets its paclet link automatically. *)
+            "<code>" ~~ inner : Shortest[__] ~~ "</code>" :> codeInlineCell[inner],
             (* an inline image is a link with a leading "!"; match it before the link *)
             "![" ~~ a : Shortest[Except["]"] ...] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> inlineImage[a, u],
             (* allow an empty URL "[`Symbol`]()" - that is the pandoc / GitHub-renderable
@@ -1442,7 +1680,7 @@ tableGridRow[cells_List, ncol_Integer, opts___] :=
    documentation stylesheets (Symbol / Guide / TechNote) and Default.nb do not
    define it, so a "TableNotes" cell renders unstyled / cramped there - switch to
    "Text" for those, which exists everywhere. *)
-$tableCellStyleFor := If[MemberQ[{"FunctionResource", "Paclet", "Example", "Data"}, $docTemplate], "TableNotes", "Text"]
+$tableCellStyleFor := If[MemberQ[{"FunctionResource", "Paclet", "Example", "Data", "Prompt", "Demonstration"}, $docTemplate], "TableNotes", "Text"]
 
 (* a pipe table renders as a styled GridBox with horizontal row dividers, a bold
    header row, and a bit of padding. The grid options are repeated inline so the
@@ -1808,6 +2046,8 @@ buildNotebook["FunctionResource", data_] := resourceNotebook["Function", data]
 buildNotebook["Paclet", data_] := resourceNotebook["Paclet", data]
 buildNotebook["Example", data_] := resourceNotebook["Example", data]
 buildNotebook["Data", data_] := resourceNotebook["Data", data]
+buildNotebook["Prompt", data_] := resourceNotebook["Prompt", data]
+buildNotebook["Demonstration", data_] := resourceNotebook["Demonstration", data]
 buildNotebook["Symbol", data_] := symbolNotebook[data]
 buildNotebook["Guide", data_] := guideNotebook[data]
 buildNotebook["TechNote", data_] := tutorialNotebook[data]
@@ -1878,20 +2118,28 @@ markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n
     dir = DirectoryName[target]; base = FileBaseName[target];
     imgDir = FileNameJoin[{dir, "images"}];
     Quiet @ CreateDirectory[imgDir, CreateIntermediateDirectories -> True];
-    codeMd[b_] := Block[{fence, imgFile, img},
+    codeMd[b_] := Block[{fence, imgFile, img, msgs, msgBlock, hasOutput},
         (* twin keeps no "#| key: value" cell options - those are notebook-side
            evaluation directives (file, screenshot, tear, eval, flag) that have
            no rendered meaning. The file include is already expanded into
            b["Code"] by resolveIncludes, so the twin shows the actual code. *)
         fence = "```" <> b["Lang"] <> "\n" <> b["Code"] <> "\n```";
-        If[ executableQ[b] && ! MissingQ[b["OutputBoxes"]] && b["OutputBoxes"] =!= Null,
+        (* captured kernel messages render as plain markdown blockquote admonitions
+           (one per message) so a stray Power::infy or Part::partw shows up in the
+           viewer right next to the cell that fired it - the twin had been silent
+           about them, hiding real errors behind a tidy-looking output image. *)
+        msgs = If[KeyExistsQ[b, "Messages"], b["Messages"], {}];
+        msgBlock = If[msgs === {} || MissingQ[msgs], "",
+            "\n\n" <> StringRiffle[DeleteCases[messageMd /@ msgs, ""], "\n\n"]];
+        hasOutput = executableQ[b] && ! MissingQ[b["OutputBoxes"]] && b["OutputBoxes"] =!= Null;
+        If[ hasOutput,
             n += 1; imgFile = base <> "-" <> ToString[n] <> ".png";
             img = UsingFrontEnd @ Rasterize[
                 Notebook[{Cell[BoxData[b["OutputBoxes"]], "Output", Sequence @@ extraOutputOpts[b]]}, LightDark -> $lightDark, StyleDefinitions -> "Default.nb"],
                 ImageResolution -> 96];
             writeImageIfChanged[FileNameJoin[{imgDir, imgFile}], img];
-            fence <> "\n\n![output](images/" <> imgFile <> ")",
-            fence
+            fence <> msgBlock <> "\n\n![output](images/" <> imgFile <> ")",
+            fence <> msgBlock
         ]
     ];
     mdOf[b_] := Switch[b["Type"],
@@ -1935,7 +2183,7 @@ exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheL
      MarkdownToNotebook[source, file]          -> write the notebook to file, return it
    ("Notebook"/"Association" are reserved; a ".md" target writes markdown; any other
    string is a notebook file path.) The layout comes from the Template frontmatter. *)
-Options[MarkdownToNotebook] = {"Evaluate" -> True}
+Options[MarkdownToNotebook] = {"Evaluate" -> True, "PreserveSource" -> False}
 
 (* spec is an *optional* second argument (default Automatic). Do not split this
    into a separate 1-argument form that forwards to the 3-argument one: an empty
@@ -1955,6 +2203,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
        Block initializer mis-binds (it reads "func" as the option name and errors
        OptionValue::optnf, leaving evalExamples False so nothing is ever evaluated). *)
     evalExamples = TrueQ[Lookup[Flatten[{opts}], "Evaluate", True]],
+    preserveSource = TrueQ[Lookup[Flatten[{opts}], "PreserveSource", False]],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cached, allHit, outputs, data, filled
 },
@@ -1999,6 +2248,13 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     defCode = StringRiffle[#["Code"] & /@ sectionCells[sections, "definition"], "\n\n"];
     data = <|"meta" -> meta, "blocks" -> blocks, "sections" -> sections, "defCode" -> defCode|>;
     filled = withCreateCellID @ applyDocFlag[buildNotebook[tmplName, data], Lookup[meta, "Flag", ""]];
+    (* "PreserveSource" -> True (default): stash the source markdown in
+       TaggingRules so NotebookToMarkdown can recover the original verbatim -
+       the notebook becomes self-contained (the rendered view + the source it
+       came from in one file), and the inverse uses the stash for perfect
+       round-trip on every MTN-built notebook. Pass "PreserveSource" -> False
+       to suppress the stash for a stricter, source-less artifact. *)
+    If[preserveSource, filled = withMarkdownSource[filled, text, tmplName]];
 
     Which[
         spec === Automatic || spec === "Notebook", filled,
@@ -2017,11 +2273,12 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
 - `FunctionResource` fills the official `FunctionResourceDefinition.nb` template (keeping its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates; `Default` maps headings and code to standard notebook styles.
 - The *frontmatter* is a YAML-style `key: value` header fenced by `---` lines at the very top of the document - the [front matter](https://jekyllrb.com/docs/front-matter/) convention static-site generators use - carrying the resource metadata. Its keys mirror the chosen template's slots (`Name`, `Description`, `Keywords`, `Categories`, `ContributedBy`, `SeeAlso`, `Links`, ...), so the author fills metadata, never cell styles.
 - The optional second argument selects the result: omitted (or `"Notebook"`) returns the [Notebook](https://reference.wolfram.com/language/ref/Notebook.html), `"Association"` returns the parsed structure, a `.nb` file name writes the notebook, and a `.md` file name writes a *markdown twin* - the same document with every evaluated output rasterized to an image beside it.
-- The function takes one option:
+- The function takes two options:
 
 | Option | Default |  |
 |---|---|---|
 | `"Evaluate"` | `True` | evaluate the example cells and keep their output; `False` leaves them as input only, which a self-referential document passes to convert its own source without re-running its own examples |
+| `"PreserveSource"` | `False` | with `True`, stash the original markdown source in `TaggingRules` so [NotebookToMarkdown]() recovers it verbatim (the notebook becomes self-contained: rendered view + source it came from); default is `False` so the notebook is a strictly-rendered artifact and the inverse falls back to its cell walker |
 
 - A `Flag` frontmatter key flags the whole document and a code cell's `#| flag:` option flags that cell, with one of the documentation build's flags - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` - the front end's Futurize / Excise toolbar buttons, written as the build's banner cell.
 - Evaluated example outputs are cached as a [PersistentSymbol](https://reference.wolfram.com/language/ref/PersistentSymbol.html) per cell at the `"Local"` [PersistenceLocation](https://reference.wolfram.com/language/ref/PersistenceLocation.html), keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
@@ -2061,10 +2318,10 @@ MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text."]
 
 ---
 
-A whole notebook has no faithful inline form, so to show the produced notebook rendered in the documentation, add `#| screenshot: true` to the example cell - it rasterizes the notebook to an image (pair with `#| tear: true` for a torn-paper screenshot):
+A whole notebook has no faithful inline form, so to show the produced notebook rendered in the documentation, the cell whose output is the notebook carries the `#| screenshot: true` option - which rasterizes the notebook to an image - and pairs it with `#| tear: N` to crop the image to the top `N` points with a torn-paper edge. Here both options sit *inside the markdown source* on a cell whose output is a literal [Notebook](https://reference.wolfram.com/language/ref/Notebook.html) expression, so the syntax is visible alongside the rendered effect:
 
 ```wl
-MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text."]
+MarkdownToNotebook["## Headline\n\n```wl\n#| screenshot: true\n#| tear: 100\nNotebook[{Cell[\"Hi\", \"Title\"], Cell[\"A paragraph.\", \"Text\"]}]\n```"]
 ```
 
 ![output](images/MarkdownToNotebook-out-2.png)
@@ -2161,10 +2418,10 @@ MarkdownToNotebook["> A quoted remark,\n> carried across two lines."]
 
 ### Evaluated code cells
 
-A fenced `wl` cell is evaluated and its output kept (then cached); a cell may carry options such as `#| eval: false` to show code without running it:
+A fenced `wl` cell is evaluated and its output kept (then cached); a cell may carry options as `#| key: value` comment lines at the top - `#| eval: false` shows the code without running it, `#| screenshot: true` rasterizes a produced `Notebook` to an inline image, `#| tear: h` adds the torn-paper screenshot edge, `#| flag: ...` marks the cell with a build flag, `#| file: path` replaces the body with the contents of a local file or URL. Two cells - one evaluated, one held - put the option syntax visibly in the markdown source:
 
 ```wl
-MarkdownToNotebook["```wl\nRange[5]^2\n```"]
+MarkdownToNotebook["## Evaluated\n\n```wl\nRange[5]^2\n```\n\n## Held\n\n```wl\n#| eval: false\nRange[5]^2\n```"]
 ```
 
 ![output](images/MarkdownToNotebook-out-11.png)
@@ -2209,13 +2466,26 @@ Module[{dir = CreateDirectory[]}, MarkdownToNotebook["## Squares\n\n```wl\nRange
 
 ### Flagging a document or cell
 
-The documentation build's *flags* - the front end's Futurize / Excise toolbar buttons - mark a page or cell as `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal`. A `Flag` frontmatter key flags the whole document; a code cell's `#| flag:` option flags that one cell. Each becomes the build's banner cell, here pulled back out of a flagged document:
+The documentation build's *flags* - the front end's Futurize / Excise toolbar buttons - mark a page or cell as `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal`. A `Flag` frontmatter key flags the whole document; a code cell's `#| flag:` option flags that one cell. Each becomes the build's banner cell at the top of the page. Here the same `#| flag:` option syntax used by the converter is visible inside the markdown source, applied to one cell of a tiny demo:
 
 ```wl
-Cases[MarkdownToNotebook["---\nFlag: Future\n---\n# Demo\n\ntext"], Cell[_, style_String /; StringEndsQ[style, "Flag"], ___], Infinity]
+MarkdownToNotebook["## Demo\n\n```wl\n#| flag: future\nRange[5]^2\n```", "Association"]["Notebook"]
 ```
 
 ![output](images/MarkdownToNotebook-out-15.png)
+
+---
+
+A paclet Symbol page with `Flag: Future` added to its frontmatter renders with the giant pink "FUTURE" banner the front end shows for unreleased pages:
+
+```wl
+MarkdownToNotebook[StringReplace[
+    Import["https://raw.githubusercontent.com/sw1sh/AccessibleColors/main/docs/Symbols/WCAGContrastRatio.md", "Text"],
+    "---\nTemplate: Symbol" -> "---\nFlag: Future\nTemplate: Symbol"
+]]
+```
+
+![output](images/MarkdownToNotebook-out-16.png)
 
 ## Options
 
@@ -2227,7 +2497,7 @@ By default every `wl` example cell is evaluated and its output kept. With the de
 MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
 ```
 
-![output](images/MarkdownToNotebook-out-16.png)
+![output](images/MarkdownToNotebook-out-17.png)
 
 ---
 
@@ -2237,7 +2507,27 @@ MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
 MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", "Evaluate" -> False]
 ```
 
-![output](images/MarkdownToNotebook-out-17.png)
+![output](images/MarkdownToNotebook-out-18.png)
+
+### PreserveSource
+
+By default the produced notebook is a strictly-rendered artifact - the `TaggingRules` it carries hold only the resource template's own metadata. The inverse, [NotebookToMarkdown](), falls back to its cell walker to reconstruct markdown from the rendered cells:
+
+```wl
+FreeQ[MarkdownToNotebook["## Demo\n\nA paragraph."], "MarkdownToNotebook" -> _]
+```
+
+![output](images/MarkdownToNotebook-out-19.png)
+
+---
+
+Pass `"PreserveSource" -> True` to stash the original markdown source under `TaggingRules -> {..., "MarkdownToNotebook" -> <|"Source" -> ..., "Template" -> ...|>}`. The notebook then becomes self-contained (rendered view + the source it came from in one file), and the inverse recovers the source verbatim for an exact round trip:
+
+```wl
+First[Cases[MarkdownToNotebook["## Demo\n\nA paragraph.", "PreserveSource" -> True], ("MarkdownToNotebook" -> v_) :> v, Infinity], <||>]
+```
+
+![output](images/MarkdownToNotebook-out-20.png)
 
 ## Applications
 
@@ -2251,7 +2541,7 @@ The [`ReverseAddSequence`](https://github.com/sw1sh/MarkdownToNotebook/blob/main
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/ReverseAddSequence.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-18.png)
+![output](images/MarkdownToNotebook-out-21.png)
 
 ### Paclet
 
@@ -2261,7 +2551,7 @@ The published [Wolfram/AccessibleColors](https://resources.wolframcloud.com/Pacl
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/main/docs/Guides/AccessibleColors.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-19.png)
+![output](images/MarkdownToNotebook-out-22.png)
 
 ### Example
 
@@ -2271,7 +2561,17 @@ The `Example` template fills the [Example Repository](https://resources.wolframc
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/PrimeSpiralPoints.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-20.png)
+![output](images/MarkdownToNotebook-out-23.png)
+
+---
+
+The [Discrete-Time Quantum Walk](https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/QuantumWalk.md) sample is a longer Example doc: it derives the Hadamard-coin walk, plots the two-horned interference distribution against the classical Gaussian, and bundles the simulator as a `"Step"` content function; deployed [here](https://www.wolframcloud.com/obj/nikm/DeployedResources/Example/Discrete-TimeQuantumWalkonaLine):
+
+```wl
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/QuantumWalk.md"]
+```
+
+![output](images/MarkdownToNotebook-out-24.png)
 
 ### Data
 
@@ -2281,7 +2581,27 @@ The `Data` template fills the [Data Repository](https://resources.wolframcloud.c
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/WallpaperGroups.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-21.png)
+![output](images/MarkdownToNotebook-out-25.png)
+
+### Prompt
+
+The `Prompt` template fills the [Prompt Repository](https://resources.wolframcloud.com/PromptRepository/) definition notebook for one of three resource types - `Persona`, `Function`, or `Modifier`. The [`AdaLovelace`](https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/AdaLovelace.md) sample is a Persona prompt whose `## Prompt` section is the system message and whose `## Chat Examples` and `## Basic Examples` invoke the persona through [LLMSynthesize](https://reference.wolfram.com/language/ref/LLMSynthesize.html) and [ChatEvaluate](https://reference.wolfram.com/language/ref/ChatEvaluate.html); deployed [here](https://www.wolframcloud.com/obj/nikm/DeployedResources/Prompt/AdaLovelace):
+
+```wl
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/AdaLovelace.md"]
+```
+
+![output](images/MarkdownToNotebook-out-26.png)
+
+### Demonstration
+
+The `Demonstration` template fills the [Demonstrations Project](https://demonstrations.wolfram.com/) authoring notebook, complete with its docked HELP / SAVE / UPDATE THUMBNAIL AND SNAPSHOTS / TEST IMAGE SIZE / UPLOAD toolbar. The [Bloch Sphere with a Quantum Gate Sequence](https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/BlochSphereGates.md) sample uses one `## Caption` paragraph, the `## Initialization` definitions (the gate matrices and the Bloch projection), a single `## Manipulate` cell, and three `## Snapshots` panels - the structure the Demonstrations review requires:
+
+```wl
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/BlochSphereGates.md"]
+```
+
+![output](images/MarkdownToNotebook-out-27.png)
 
 ## Properties and Relations
 
@@ -2291,7 +2611,7 @@ The Wolfram Language already reads markdown into a plain notebook - <code>[Impor
 ImportString["# Title\n\nText with inline math $\\sin x$.", {"Markdown", "Notebook"}]
 ```
 
-![output](images/MarkdownToNotebook-out-22.png)
+![output](images/MarkdownToNotebook-out-28.png)
 
 `FunctionResource` then fills the same template [CreateNotebook](https://reference.wolfram.com/language/ref/CreateNotebook.html)["FunctionResource"] opens (publishable with [ResourceSubmit](https://reference.wolfram.com/language/ref/ResourceSubmit.html)), and `Symbol`/`Guide` fill the DocumentationTools templates `DocumentationBuild` turns into reference pages.
 
@@ -2303,16 +2623,96 @@ A string that is neither a URL nor an existing file is treated as raw markdown, 
 MarkdownToNotebook["nonexistent.md", "Association"]["Sections"]
 ```
 
-![output](images/MarkdownToNotebook-out-23.png)
+![output](images/MarkdownToNotebook-out-29.png)
 
 ## Neat Examples
 
-Convert the [`ReverseAddSequence`](https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/ReverseAddSequence.md) sample - a one-line Function Repository submission whose entire definition, usage, examples, and metadata sit in a 90-line markdown file - and open the produced notebook to see the docked Deploy / Submit toolbar a hand-authored definition notebook would have, ready to publish without further editing:
+The neatest example is this very document: running the function on its own GitHub source produces the notebook itself, the one you are reading (its `## Definition` even inlines `MarkdownToNotebook.wl` from the same GitHub directory, so the one URL is self-contained). The example converts its own source, so it passes `"Evaluate" -> False` to leave that copy's example cells unevaluated rather than re-run this very example without end:
 
 ```wl
-NotebookPut[MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/ReverseAddSequence.md"]]
+NotebookPut[MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/MarkdownToNotebook.md", "Evaluate" -> False]]
 ```
 
-![output](images/MarkdownToNotebook-out-24.png)
+![output](images/MarkdownToNotebook-out-30.png)
 
-This very document is itself such a literate source - its `## Definition` inlines `MarkdownToNotebook.wl` and its frontmatter is the resource metadata - so the function also publishes itself end to end.
+Because this very document is itself such a literate source - its `## Definition` inlines `MarkdownToNotebook.wl` and its frontmatter is the resource metadata - running the function on it reproduces this definition notebook, so the function publishes itself.
+
+## Tests
+
+Each `wl` cell in this section is an explicit `VerificationTest[code, expected, TestID -> ...]` expression that becomes one Input cell in the resource's `VerificationTests` slot (the docked *Run Tests* button evaluates them). These are the regressions the converter has hit; `tests.wls` in the repo runs the same cells out-of-band by parsing this section, so the in-notebook button and the CI script run the same assertions from a single source.
+
+Basic conversion returns a `Notebook` expression:
+
+```wl
+VerificationTest[
+    Head @ MarkdownToNotebook["# Hi\n\nA paragraph."],
+    Notebook,
+    TestID -> "basic conversion returns a Notebook"
+]
+```
+
+![output](images/MarkdownToNotebook-out-31.png)
+
+A `<code>[Symbol](https://reference.wolfram.com/language/ref/Symbol.html)</code>` reference in a Usage signature carries a paclet link on the head (regression: the link silently disappeared when the `<code>` rule was rewritten to wrap the whole span in one `InlineFormula` instead of recursing on the inside):
+
+```wl
+VerificationTest[
+    ! FreeQ[
+        MarkdownToNotebook["---\nTemplate: Symbol\nName: Range\nContext: System`\nPaclet: System\nURI: System/ref/Range\n---\n\n## Usage\n\n<code>[Range]()[$n$]</code> gives a list."],
+        ButtonBox["Range", BaseStyle -> "Link", ___]
+    ],
+    True,
+    TestID -> "<code>[Symbol]()...</code> in Usage carries a paclet link on the head"
+]
+```
+
+![output](images/MarkdownToNotebook-out-32.png)
+
+A bullet list with indented continuation lines folds each continuation into the preceding item, so a three-bullet list with two-line continuations is three items, not six (regression: the list parser used to break at the continuation, producing alternating one-item lists and stray paragraphs):
+
+```wl
+VerificationTest[
+    Length @ Cases[
+        MarkdownToNotebook["## Demo\n\n- First bullet\n  that wraps.\n- Second bullet\n  also wraps.\n- Third bullet."],
+        Cell[_, "Notes" | "Item" | "Bullet", ___],
+        Infinity
+    ],
+    3,
+    TestID -> "multi-line bullets fold into single items (3, not 6)"
+]
+```
+
+![output](images/MarkdownToNotebook-out-33.png)
+
+The `"PreserveSource"` option defaults to `False`, so a notebook the converter writes does *not* carry the source in its `TaggingRules`:
+
+```wl
+VerificationTest[
+    FreeQ[MarkdownToNotebook["# Hi"], "MarkdownToNotebook" -> _],
+    True,
+    TestID -> "\"PreserveSource\" defaults to False - no stash in TaggingRules"
+]
+```
+
+![output](images/MarkdownToNotebook-out-34.png)
+
+With `"PreserveSource" -> True`, the source is stashed under the `"MarkdownToNotebook"` tagging key and the inverse round-trips it byte-exactly:
+
+```wl
+VerificationTest[
+    With[{src = "## Demo\n\nA paragraph.\n"},
+        First[
+            Cases[
+                MarkdownToNotebook[src, "PreserveSource" -> True],
+                ("MarkdownToNotebook" -> v_) :> v,
+                Infinity
+            ],
+            <||>
+        ]["Source"] === src
+    ],
+    True,
+    TestID -> "\"PreserveSource\" -> True stashes the source under \"MarkdownToNotebook\""
+]
+```
+
+![output](images/MarkdownToNotebook-out-35.png)

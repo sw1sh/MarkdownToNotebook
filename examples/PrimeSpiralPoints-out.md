@@ -18,6 +18,8 @@ The resource exposes one content element, `"Points"`: the polar coordinates $(p_
 ResourceData[ResourceObject[EvaluationNotebook[]], "Points"] = Table[{Prime[n] Cos[n], Prime[n] Sin[n]}, {n, 200}];
 ```
 
+> Set::write: Tag ResourceData in ResourceData[$Failed, Points] is Protected.
+
 ## Examples
 
 The content is a list of 200 planar points.
