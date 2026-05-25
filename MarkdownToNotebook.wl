@@ -432,17 +432,11 @@ messageCell[Hold[Message[MessageName[head_, tag_String], args___], _]] := Module
 ]
 messageCell[hf_] := Cell[ToString[hf, InputForm], "Message", "MSG"]
 
-(* Tags fired routinely during paclet load / private-context evaluation that are
-   package-author or kernel-bookkeeping warnings, never seen interactively. *)
-$noiseMessageTags = {"newsym", "shdw", "patv", "sntxi", "rmnsm", "remal"}
-
-(* keep only messages whose head lives in user-visible contexts and whose tag is not
-   on the noise list - drops Internal` / Developer` messages and the chatty warnings
-   we already know to ignore. Accepts the raw "Hold[Message[...], qFlag]" form the
-   message hook delivers. *)
-keepMessageQ[Hold[Message[MessageName[h_Symbol, tag_String], ___], _]] :=
-    MatchQ[Context[h], "System`" | $docContext | "Global`"] &&
-    ! MemberQ[$noiseMessageTags, tag]
+(* Keep only messages whose head lives in user-visible contexts. Internal` /
+   Developer` chatter never reaches an interactive user, so it should never reach
+   our message cells either. *)
+keepMessageQ[Hold[Message[MessageName[h_Symbol, _String], ___], _]] :=
+    MatchQ[Context[h], "System`" | $docContext | "Global`"]
 keepMessageQ[_] := False
 
 messageNameOf[Hold[Message[name_, ___], _]] := ToString[name, InputForm]
@@ -474,9 +468,22 @@ accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res,
       "out" -> Append[state["out"], Hash[code] -> <|"out" -> outputBoxes[res, b["Options"]], "msgs" -> msgs|>]|>
 ]
 
+(* Pre-load the paclets on the context path so their auto-load chatter
+   (General::newsym for each interned symbol, ::shdw for cross-context shadowing,
+   Pattern::patv from package-private code) fires here, OUTSIDE the per-cell
+   capture scope. Without this, the first cell that references a paclet symbol
+   ends up "owning" hundreds of bookkeeping messages that have nothing to do
+   with what the user wrote - the FE never shows them either, since by the time
+   the user clicks Run the paclet is already loaded. Silence anything that
+   leaks during the load itself via Quiet - if the paclet genuinely fails to
+   load, the first cell that uses it will surface a real error. *)
+preloadContextPath[ctxPath_List] :=
+    Quiet @ Scan[Quiet @ Check[Needs[#], Null] &, Select[ctxPath, # =!= "System`" &]]
+
 (* a front end is active for the whole pass so an example may open the notebook it
    produces (NotebookPut) and have its thumbnail captured (see outputBoxes). *)
 evaluateAll[cells_List, ctx_String, ctxPath_List] := Block[{$Context = ctx, $ContextPath = ctxPath},
+    preloadContextPath[ctxPath];
     UsingFrontEnd[Fold[accumEval, <|"code" -> "", "out" -> <||>|>, cells]]["out"]
 ]
 
