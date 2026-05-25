@@ -59,7 +59,7 @@ reference pages (the `wolfram-symbol-page` skill) carry the detail.
 ```
 (* MarkdownToNotebook is not on the public Function Repository yet, so use
    its public cloud deployment *)
-mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn = ResourceFunction[ResourceObject["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"]];
 mtn["GuideName.md", "Documentation/English/Guides/GuideName.nb"]
 ```
 

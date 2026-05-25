@@ -95,7 +95,7 @@ inline (so the example produces real output) or mark those cells `eval: false`.
 ```
 (* MarkdownToNotebook is not on the public Function Repository yet, so use
    its public cloud deployment *)
-mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn = ResourceFunction[ResourceObject["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"]];
 mtn["PrimeSpiralPoints.md", "PrimeSpiralPoints.nb"]
 ```
 

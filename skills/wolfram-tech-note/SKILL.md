@@ -63,7 +63,7 @@ make pandoc / GitHub render the `[...]()` as a link element.
 ```
 (* MarkdownToNotebook is not on the public Function Repository yet, so use
    its public cloud deployment *)
-mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn = ResourceFunction[ResourceObject["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"]];
 mtn["TechNoteName.md", "Documentation/English/Tutorials/TechNoteName.nb"]
 ```
 

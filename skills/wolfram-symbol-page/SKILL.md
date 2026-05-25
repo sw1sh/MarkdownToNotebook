@@ -86,7 +86,7 @@ options (`eval`, `screenshot`, `tear`, `flag`) work as elsewhere; inline math is
 ```
 (* MarkdownToNotebook is not on the public Function Repository yet, so use
    its public cloud deployment *)
-mtn = ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"];
+mtn = ResourceFunction[ResourceObject["https://www.wolframcloud.com/obj/nikm/DeployedResources/Function/MarkdownToNotebook"]];
 mtn["SymbolName.md", "Documentation/English/ReferencePages/Symbols/SymbolName.nb"]
 ```
 
