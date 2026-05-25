@@ -70,3 +70,34 @@ mtn["TechNoteName.md", "Documentation/English/Tutorials/TechNoteName.nb"]
 Then build the paclet docs with `DocumentationBuild`, and list the tech note under
 the paclet's guide / related pages (author those with the `wolfram-guide-page` and
 `wolfram-paclet` skills).
+
+## Check
+
+Before submission, run the docked *Check* button (top of every resource
+definition notebook) - it lints the document against the submission
+guidelines and reports hints by level. Headless, the same lint runs through
+`DefinitionNotebookClient`CheckDefinitionNotebook[nbo]` after stamping
+CellIDs and saving (the headless build does not assign CellIDs, and the
+scraper needs them to locate cells):
+
+```wl
+Needs["DefinitionNotebookClient`"]
+UsingFrontEnd @ Block[{nbo = NotebookOpen[File["MyResource.nb"]]},
+    CurrentValue[nbo, CreateCellID] = True;
+    SelectionMove[nbo, All, Notebook];
+    FrontEndTokenExecute[nbo, "Save"];
+    Normal @ DefinitionNotebookClient`CheckDefinitionNotebook[nbo]
+]
+```
+
+Each row is `<|"Level" -> ..., "Tag" -> ..., "Parameters" -> ...|>` with
+`Level` one of `Suggestion` / `Warning` / `Error`. Common tags to address
+before submission: `DescriptionTooLong` (shorten to under 128 chars),
+`ExampleTextLastCharacter` (end an example caption with `:`),
+`FoundUnformattedCode` (wrap a stray WL symbol in `` `backticks` `` or in
+an inferred `[Symbol]()` link), `ThreeDotEllipsis` (use `…` not `...`),
+`NotASystemSymbol` (link foreign function-repo names instead of formatting
+them as system symbols), `LargeCellBounds/CellHeight` (rasterized output too
+big - crop it with `#| tear: h` or shrink the source). The repo's
+`check.wls` runs the same lint on every built `.nb` and prints a per-file
+summary.

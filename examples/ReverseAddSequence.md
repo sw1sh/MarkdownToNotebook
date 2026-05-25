@@ -40,7 +40,7 @@ iterations even if no palindrome was reached.
 ## Details & Options
 
 - At each step the next value is the current one plus the integer formed by
-  reversing its digits, so `89 + 98 -> 187 -> 187 + 781 -> 968 -> ...`.
+  reversing its digits, so `89 + 98 -> 187 -> 187 + 781 -> 968 -> …`.
 - The iteration ends as soon as the value is a *digit palindrome*, the test
   used to declare success in the Lychrel literature.
 - The default step cap is 50; raise it to chase candidates that take longer to
@@ -55,7 +55,7 @@ The two-digit input `89` reaches a palindrome in 24 steps:
 ReverseAddSequence[89]
 ```
 
-<!-- => {89, 187, 968, 1837, 9218, 17347, ..., 8813200023188} -->
+<!-- => {89, 187, 968, 1837, 9218, 17347, …, 8813200023188} -->
 
 ## Scope
 

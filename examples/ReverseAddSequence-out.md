@@ -34,17 +34,9 @@ ReverseAddSequence[n_Integer, max_Integer: 50] := NestWhileList[
 
 ## Details & Options
 
-- At each step the next value is the current one plus the integer formed by
-
-  reversing its digits, so `89 + 98 -> 187 -> 187 + 781 -> 968 -> ...`.
-
-- The iteration ends as soon as the value is a *digit palindrome*, the test
-
-  used to declare success in the Lychrel literature.
-
-- The default step cap is 50; raise it to chase candidates that take longer to
-
-  resolve. Numbers that are conjectured never to reach a palindrome (Lychrel   candidates, starting with 196) hit the cap instead.
+- At each step the next value is the current one plus the integer formed by reversing its digits, so `89 + 98 -> 187 -> 187 + 781 -> 968 -> …`.
+- The iteration ends as soon as the value is a *digit palindrome*, the test used to declare success in the Lychrel literature.
+- The default step cap is 50; raise it to chase candidates that take longer to resolve. Numbers that are conjectured never to reach a palindrome (Lychrel candidates, starting with 196) hit the cap instead.
 
 ## Basic Examples
 

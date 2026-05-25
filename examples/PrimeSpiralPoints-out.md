@@ -12,7 +12,7 @@ Links: ["[Prime spirals](https://en.wikipedia.org/wiki/Ulam_spiral)"]
 
 ## Content
 
-The resource exposes one content element, `"Points"`: the polar coordinates $(p_n \cos n, p_n \sin n)$ for the first 200 primes $p_n$. Fetch it with [ResourceData](https://reference.wolfram.com/language/ref/ResourceData.html).
+The resource exposes one content element, `"Points"`: the polar coordinates $(p_n \cos n, p_n \sin n)$ for the first 200 primes $p_n$, fetched with [ResourceData](https://reference.wolfram.com/language/ref/ResourceData.html):
 
 ```wl
 ResourceData[ResourceObject[EvaluationNotebook[]], "Points"] = Table[{Prime[n] Cos[n], Prime[n] Sin[n]}, {n, 200}];
@@ -22,7 +22,7 @@ ResourceData[ResourceObject[EvaluationNotebook[]], "Points"] = Table[{Prime[n] C
 
 ## Examples
 
-The content is a list of 200 planar points.
+The content is a list of 200 planar points:
 
 ```wl
 points = Table[{Prime[n] Cos[n], Prime[n] Sin[n]}, {n, 200}];
@@ -31,7 +31,7 @@ Length[points]
 
 ![output](images/PrimeSpiralPoints-out-1.png)
 
-Plotting them traces a loose spiral, since consecutive primes grow almost linearly while the angle winds around.
+Plotting them traces a loose spiral, since consecutive primes grow almost linearly while the angle winds around:
 
 ```wl
 ListPlot[points, AspectRatio -> 1]

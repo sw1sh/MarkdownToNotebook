@@ -35,7 +35,7 @@ group.
 
 ## Content
 
-The full classification, keyed by the IUC short symbol.
+The full classification, keyed by the IUC short symbol:
 
 ```wl
 wallpaperGroups = <|
@@ -61,7 +61,7 @@ wallpaperGroups = <|
 
 The resource stores the classification as primary content (so `$$Data` is the whole
 association) and the per-group lattice / point-group / orbifold fields as named
-content elements, fetched with [ResourceData]().
+content elements, fetched with [ResourceData]():
 
 ```wl
 #| eval: false
@@ -82,7 +82,7 @@ ResourceData[ResourceObject[EvaluationNotebook[]], "ByPointGroup"] = GroupBy[Val
 
 Look up a single group. p4m, the symmetry group of a square grid with mirrors and
 diagonals, has $D_4$ point symmetry and four mirror axes plus two glide axes per
-fundamental domain.
+fundamental domain:
 
 ```wl
 wallpaperGroups["p4m"]
@@ -100,14 +100,14 @@ Length[wallpaperGroups]
 
 The seventeen groups distribute across five lattice types. The hexagonal lattice
 hosts five of them (the only one that supports 3- and 6-fold rotations); the
-oblique lattice, having the least symmetry, hosts only two.
+oblique lattice, having the least symmetry, hosts only two:
 
 ```wl
 Dataset @ ReverseSort @ Counts[Values[wallpaperGroups][[All, "Lattice"]]]
 ```
 
 By point group, the C / D pairs reflect whether reflections are added to the
-rotations.
+rotations:
 
 ```wl
 Dataset @ KeySort @ Counts[Values[wallpaperGroups][[All, "PointGroup"]]]
@@ -117,7 +117,7 @@ Dataset @ KeySort @ Counts[Values[wallpaperGroups][[All, "PointGroup"]]]
 
 The mirror / glide counts per fundamental domain, ordered by IUC symbol, highlight
 which groups carry many reflection axes (p4m, p6m) versus only rotations (p1, p2,
-p3, p4, p6).
+p3, p4, p6):
 
 ```wl
 keys = Keys[wallpaperGroups];
@@ -131,7 +131,7 @@ BarChart[
 ```
 
 A simple geometric showcase: render the rotation lattices of the three highest-symmetry
-groups by placing rotation-center markers on the appropriate unit cell.
+groups by placing rotation-center markers on the appropriate unit cell:
 
 ```wl
 latticePlot[name_String, poly_, centers_] := Graphics[{
@@ -181,7 +181,7 @@ orbifoldChi /@ {"o", "2222", "*632", "*442", "333", "*333"}
 <!-- => {0, 0, 0, 0, 0, 0} -->
 
 All seventeen orbifolds have characteristic zero, the equation that classifies them
-as the wallpaper groups.
+as the wallpaper groups:
 
 ```wl
 ReverseSort @ Counts[orbifoldChi /@ Values[wallpaperGroups][[All, "Orbifold"]]]

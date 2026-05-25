@@ -2,7 +2,7 @@
 Template: FunctionResource
 ResourceType: Function
 Name: NotebookToMarkdown
-Description: Recover the markdown source from a notebook produced by MarkdownToNotebook
+Description: Recover the original markdown source from a Wolfram notebook
 ContributedBy: "Nikolay Murzin, Claude (Anthropic)"
 Keywords: [markdown, literate programming, inverse, function repository, notebook, round trip]
 Categories: [Notebook Documents & Presentation]
@@ -221,7 +221,7 @@ With[{md = "# Demo\n\nA paragraph.\n\n```wl\nRange[5]^2\n```"},
 
 ## Scope
 
-A `.nb` file path is `Get`ed and converted the same way:
+A `.nb` file path is read via `Get` and converted the same way:
 
 ```wl
 NotebookToMarkdown[FileNameJoin[{$TemporaryDirectory, "no-such-file.nb"}]] === Null
@@ -262,7 +262,7 @@ First[
 
 ## Possible Issues
 
-A notebook never produced by [MarkdownToNotebook]() (or one written with `"PreserveSource" -> False`, the default) has no stash, so the inverse falls back to its cell walker - that walker is best-effort and may not reproduce every formatting detail. Round-trip for arbitrary notebooks is *not* guaranteed; round-trip for notebooks the converter wrote with the stash *is*.
+A notebook never produced by [MarkdownToNotebook]() (or one written with `"PreserveSource" -> False`, the default) has no stash, so the inverse falls back to its cell walker - that walker is best-effort and may not reproduce every formatting detail. Round-trip for arbitrary notebooks is *not* guaranteed; round-trip for notebooks the converter wrote with the stash *is*:
 
 ```wl
 NotebookToMarkdown @ Notebook[{Cell["Hello", "Text"]}]

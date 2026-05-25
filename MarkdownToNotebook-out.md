@@ -501,6 +501,22 @@ resultNotebook[res_] := Block[{nb = If[Head[res] === NotebookObject, NotebookGet
    rasterized and closed, the WFR-canonical display; a bare Notebook *expression*
    opts into the same rasterization with "#| screenshot: true" (otherwise it is
    shown as its literal expression boxes). *)
+(* keep a rasterized cell image under the resource Check's "large cell area"
+   threshold (~500k pixels). Cap both the long dimension and the area to keep
+   the cell from tripping LargeCellBounds while still showing the content
+   readably. *)
+$rasterMaxLongDim = 1200
+$rasterMaxArea = 480000
+capRaster[img_] := If[ ! ImageQ[img], img,
+    Block[{w, h, longDim, area, scale},
+        {w, h} = ImageDimensions[img];
+        longDim = Max[w, h];
+        area = w h;
+        scale = Min[1, $rasterMaxLongDim / longDim, Sqrt[$rasterMaxArea / area]];
+        If[scale < 1, ImageResize[img, Round[scale {w, h}]], img]
+    ]
+]
+
 outputBoxes[res_, opts_] := Which[
     res === Null, Null,
     Head[res] === NotebookObject,
@@ -510,9 +526,9 @@ outputBoxes[res_, opts_] := Which[
            entire notebook. *)
         With[{img = Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 96]},
             Quiet @ NotebookClose[res];
-            ToBoxes @ If[ImageQ[img] && Last[ImageDimensions[img]] > 1400, ImageResize[img, {Automatic, 1400}], img]],
+            ToBoxes @ capRaster[img]],
     TrueQ[Lookup[opts, "screenshot", False]] && Head[res] === Notebook,
-        ToBoxes @ Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 144],
+        ToBoxes @ capRaster @ Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 144],
     True, ToBoxes[res]
 ]
 
@@ -2271,7 +2287,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
 - The *source* is a local file path, an `http(s)` URL, or a raw markdown string.
 - The layout is the document's own `Template` frontmatter key - `FunctionResource`, `Symbol`, `Guide`, `TechNote`, `Paclet`, `Example`, or `Default` - so the source declares its own layout.
 - `FunctionResource` fills the official `FunctionResourceDefinition.nb` template (keeping its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates; `Default` maps headings and code to standard notebook styles.
-- The *frontmatter* is a YAML-style `key: value` header fenced by `---` lines at the very top of the document - the [front matter](https://jekyllrb.com/docs/front-matter/) convention static-site generators use - carrying the resource metadata. Its keys mirror the chosen template's slots (`Name`, `Description`, `Keywords`, `Categories`, `ContributedBy`, `SeeAlso`, `Links`, ...), so the author fills metadata, never cell styles.
+- The *frontmatter* is a YAML-style `key: value` header fenced by `---` lines at the very top of the document - the [front matter](https://jekyllrb.com/docs/front-matter/) convention static-site generators use - carrying the resource metadata. Its keys mirror the chosen template's slots (`Name`, `Description`, `Keywords`, `Categories`, `ContributedBy`, `SeeAlso`, `Links`, and so on), so the author fills metadata, never cell styles.
 - The optional second argument selects the result: omitted (or `"Notebook"`) returns the [Notebook](https://reference.wolfram.com/language/ref/Notebook.html), `"Association"` returns the parsed structure, a `.nb` file name writes the notebook, and a `.md` file name writes a *markdown twin* - the same document with every evaluated output rasterized to an image beside it.
 - The function takes two options:
 
@@ -2372,7 +2388,7 @@ MarkdownToNotebook["Inline `Range[3]`, *italic*, **bold**, ~~struck~~, ``verbati
 
 ### Display math
 
-A `$$ ... $$` block (on its own line, or fenced across lines) becomes a centered `DisplayFormula` cell - the standard style for a displayed equation:
+A `$$ … $$` block (on its own line, or fenced across lines) becomes a centered `DisplayFormula` cell - the standard style for a displayed equation:
 
 ```wl
 MarkdownToNotebook["The Pythagorean identity:\n\n$$ a^2 + b^2 = c^2 $$"]
@@ -2418,7 +2434,7 @@ MarkdownToNotebook["> A quoted remark,\n> carried across two lines."]
 
 ### Evaluated code cells
 
-A fenced `wl` cell is evaluated and its output kept (then cached); a cell may carry options as `#| key: value` comment lines at the top - `#| eval: false` shows the code without running it, `#| screenshot: true` rasterizes a produced `Notebook` to an inline image, `#| tear: h` adds the torn-paper screenshot edge, `#| flag: ...` marks the cell with a build flag, `#| file: path` replaces the body with the contents of a local file or URL. Two cells - one evaluated, one held - put the option syntax visibly in the markdown source:
+A fenced `wl` cell is evaluated and its output kept (then cached); a cell may carry options as `#| key: value` comment lines at the top - `#| eval: false` shows the code without running it, `#| screenshot: true` rasterizes a produced `Notebook` to an inline image, `#| tear: h` adds the torn-paper screenshot edge, `#| flag: …` marks the cell with a build flag, `#| file: path` replaces the body with the contents of a local file or URL. Two cells - one evaluated, one held - put the option syntax visibly in the markdown source:
 
 ```wl
 MarkdownToNotebook["## Evaluated\n\n```wl\nRange[5]^2\n```\n\n## Held\n\n```wl\n#| eval: false\nRange[5]^2\n```"]
@@ -2476,7 +2492,7 @@ MarkdownToNotebook["## Demo\n\n```wl\n#| flag: future\nRange[5]^2\n```", "Associ
 
 ---
 
-A paclet Symbol page with `Flag: Future` added to its frontmatter renders with the giant pink "FUTURE" banner the front end shows for unreleased pages:
+A paclet `Symbol` page with `Flag: Future` added to its frontmatter renders with the giant pink "FUTURE" banner the front end shows for unreleased pages:
 
 ```wl
 MarkdownToNotebook[StringReplace[
@@ -2521,7 +2537,7 @@ FreeQ[MarkdownToNotebook["## Demo\n\nA paragraph."], "MarkdownToNotebook" -> _]
 
 ---
 
-Pass `"PreserveSource" -> True` to stash the original markdown source under `TaggingRules -> {..., "MarkdownToNotebook" -> <|"Source" -> ..., "Template" -> ...|>}`. The notebook then becomes self-contained (rendered view + the source it came from in one file), and the inverse recovers the source verbatim for an exact round trip:
+Pass `"PreserveSource" -> True` to stash the original markdown source under `TaggingRules -> {…, "MarkdownToNotebook" -> <|"Source" -> …, "Template" -> …|>}`. The notebook then becomes self-contained (rendered view + the source it came from in one file), and the inverse recovers the source verbatim for an exact round trip:
 
 ```wl
 First[Cases[MarkdownToNotebook["## Demo\n\nA paragraph.", "PreserveSource" -> True], ("MarkdownToNotebook" -> v_) :> v, Infinity], <||>]
@@ -2531,7 +2547,7 @@ First[Cases[MarkdownToNotebook["## Demo\n\nA paragraph.", "PreserveSource" -> Tr
 
 ## Applications
 
-`MarkdownToNotebook` fills every Wolfram Repository definition notebook from plain markdown, so authors never edit notebook cell styles by hand. The samples below live under [`examples/`](https://github.com/sw1sh/MarkdownToNotebook/tree/main/examples) in the repository; `examples/build.wls` builds each one and `DeployResource`-style `CloudDeploy[ResourceObject[nb], ..., Permissions -> "Public"]`s it under a stable public URL, so every link below resolves to the live deployed notebook.
+`MarkdownToNotebook` fills every Wolfram Repository definition notebook from plain markdown, so authors never edit notebook cell styles by hand. The samples below live under [`examples/`](https://github.com/sw1sh/MarkdownToNotebook/tree/main/examples) in the repository; `examples/build.wls` builds each one and `DeployResource`-style `CloudDeploy[ResourceObject[nb], …, Permissions -> "Public"]`s it under a stable public URL, so every link below resolves to the live deployed notebook.
 
 ### Function Resource
 
@@ -2639,7 +2655,7 @@ Because this very document is itself such a literate source - its `## Definition
 
 ## Tests
 
-Each `wl` cell in this section is an explicit `VerificationTest[code, expected, TestID -> ...]` expression that becomes one Input cell in the resource's `VerificationTests` slot (the docked *Run Tests* button evaluates them). These are the regressions the converter has hit; `tests.wls` in the repo runs the same cells out-of-band by parsing this section, so the in-notebook button and the CI script run the same assertions from a single source.
+Each `wl` cell in this section is an explicit `VerificationTest[code, expected, TestID -> …]` expression that becomes one Input cell in the resource's `VerificationTests` slot (the docked *Run Tests* button evaluates them). These are the regressions the converter has hit; `tests.wls` in the repo runs the same cells out-of-band by parsing this section, so the in-notebook button and the CI script run the same assertions from a single source.
 
 Basic conversion returns a `Notebook` expression:
 
@@ -2662,7 +2678,7 @@ VerificationTest[
         ButtonBox["Range", BaseStyle -> "Link", ___]
     ],
     True,
-    TestID -> "<code>[Symbol]()...</code> in Usage carries a paclet link on the head"
+    TestID -> "<code>[Symbol]()…</code> in Usage carries a paclet link on the head"
 ]
 ```
 

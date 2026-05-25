@@ -30,7 +30,7 @@ The plane has exactly seventeen distinct symmetry groups: any periodic pattern o
 
 ## Content
 
-The full classification, keyed by the IUC short symbol.
+The full classification, keyed by the IUC short symbol:
 
 ```wl
 wallpaperGroups = <|
@@ -54,7 +54,7 @@ wallpaperGroups = <|
 |>;
 ```
 
-The resource stores the classification as primary content (so `$$Data` is the whole association) and the per-group lattice / point-group / orbifold fields as named content elements, fetched with [ResourceData](https://reference.wolfram.com/language/ref/ResourceData.html).
+The resource stores the classification as primary content (so `$$Data` is the whole association) and the per-group lattice / point-group / orbifold fields as named content elements, fetched with [ResourceData](https://reference.wolfram.com/language/ref/ResourceData.html):
 
 ```wl
 ResourceData[ResourceObject[EvaluationNotebook[]]] = wallpaperGroups
@@ -70,7 +70,7 @@ ResourceData[ResourceObject[EvaluationNotebook[]], "ByPointGroup"] = GroupBy[Val
 
 ## Basic Examples
 
-Look up a single group. p4m, the symmetry group of a square grid with mirrors and diagonals, has $D_4$ point symmetry and four mirror axes plus two glide axes per fundamental domain.
+Look up a single group. p4m, the symmetry group of a square grid with mirrors and diagonals, has $D_4$ point symmetry and four mirror axes plus two glide axes per fundamental domain:
 
 ```wl
 wallpaperGroups["p4m"]
@@ -88,7 +88,7 @@ Length[wallpaperGroups]
 
 ## Scope & Additional Elements
 
-The seventeen groups distribute across five lattice types. The hexagonal lattice hosts five of them (the only one that supports 3- and 6-fold rotations); the oblique lattice, having the least symmetry, hosts only two.
+The seventeen groups distribute across five lattice types. The hexagonal lattice hosts five of them (the only one that supports 3- and 6-fold rotations); the oblique lattice, having the least symmetry, hosts only two:
 
 ```wl
 Dataset @ ReverseSort @ Counts[Values[wallpaperGroups][[All, "Lattice"]]]
@@ -96,7 +96,7 @@ Dataset @ ReverseSort @ Counts[Values[wallpaperGroups][[All, "Lattice"]]]
 
 ![output](images/WallpaperGroups-out-3.png)
 
-By point group, the C / D pairs reflect whether reflections are added to the rotations.
+By point group, the C / D pairs reflect whether reflections are added to the rotations:
 
 ```wl
 Dataset @ KeySort @ Counts[Values[wallpaperGroups][[All, "PointGroup"]]]
@@ -106,7 +106,7 @@ Dataset @ KeySort @ Counts[Values[wallpaperGroups][[All, "PointGroup"]]]
 
 ## Visualizations
 
-The mirror / glide counts per fundamental domain, ordered by IUC symbol, highlight which groups carry many reflection axes (p4m, p6m) versus only rotations (p1, p2, p3, p4, p6).
+The mirror / glide counts per fundamental domain, ordered by IUC symbol, highlight which groups carry many reflection axes (p4m, p6m) versus only rotations (p1, p2, p3, p4, p6):
 
 ```wl
 keys = Keys[wallpaperGroups];
@@ -121,7 +121,7 @@ BarChart[
 
 ![output](images/WallpaperGroups-out-5.png)
 
-A simple geometric showcase: render the rotation lattices of the three highest-symmetry groups by placing rotation-center markers on the appropriate unit cell.
+A simple geometric showcase: render the rotation lattices of the three highest-symmetry groups by placing rotation-center markers on the appropriate unit cell:
 
 ```wl
 latticePlot[name_String, poly_, centers_] := Graphics[{
@@ -166,7 +166,7 @@ orbifoldChi /@ {"o", "2222", "*632", "*442", "333", "*333"}
 
 ![output](images/WallpaperGroups-out-7.png)
 
-All seventeen orbifolds have characteristic zero, the equation that classifies them as the wallpaper groups.
+All seventeen orbifolds have characteristic zero, the equation that classifies them as the wallpaper groups:
 
 ```wl
 ReverseSort @ Counts[orbifoldChi /@ Values[wallpaperGroups][[All, "Orbifold"]]]

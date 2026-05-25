@@ -21,7 +21,7 @@ classical $\sqrt{t}$, producing the characteristic two-horned distribution.
 
 The walk acts on the tensor product of a position register (sites $-n \dots n$) and
 a coin qubit, in the basis order $\{R, L\}$. One step is the spin-conditioned shift
-$S$ applied after the Hadamard coin $H \otimes I$.
+$S$ applied after the Hadamard coin $H \otimes I$:
 
 ```wl
 quantumWalk[n_] := Module[{hadamard = {{1, 1}, {1, -1}} / Sqrt[2], psi, step},
@@ -35,7 +35,7 @@ quantumWalk[n_] := Module[{hadamard = {{1, 1}, {1, -1}} / Sqrt[2], psi, step},
 ```
 
 The resource stores the full time evolution and the final distribution as content
-elements, fetched with [ResourceData]().
+elements, fetched with [ResourceData]():
 
 ```wl
 #| eval: false
@@ -51,7 +51,7 @@ ResourceData[ResourceObject[EvaluationNotebook[]], "FinalDistribution"] = Associ
 
 After 100 steps the distribution has two sharp peaks near $\pm n / \sqrt{2}$, far
 from the origin where a classical walker would concentrate. Only same-parity sites
-are occupied at each step, so plot every other site.
+are occupied at each step, so plot every other site:
 
 ```wl
 points[p_] := Transpose[{Range[-100, 100], p}][[1 ;; ;; 2]];
@@ -61,7 +61,7 @@ ListPlot[points[distribution], Filling -> Axis, PlotRange -> All, AxesLabel -> {
 
 The classical random walk of the same length is a binomial distribution: a single
 Gaussian peak at the origin. Overlaying the two shows ballistic versus diffusive
-transport.
+transport:
 
 ```wl
 classical = Table[If[EvenQ[x], Binomial[100, (x + 100) / 2] / 2^100, 0], {x, -100, 100}];
@@ -71,7 +71,7 @@ ListPlot[{points[distribution], points[classical]}, Filling -> Axis, PlotRange -
 ---
 
 The spreading rates differ qualitatively: the quantum standard deviation grows
-linearly in the number of steps, while the classical one grows like $\sqrt{t}$.
+linearly in the number of steps, while the classical one grows like $\sqrt{t}$:
 
 ```wl
 sites = Range[-100, 100];

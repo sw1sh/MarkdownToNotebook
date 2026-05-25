@@ -427,6 +427,22 @@ resultNotebook[res_] := Block[{nb = If[Head[res] === NotebookObject, NotebookGet
    rasterized and closed, the WFR-canonical display; a bare Notebook *expression*
    opts into the same rasterization with "#| screenshot: true" (otherwise it is
    shown as its literal expression boxes). *)
+(* keep a rasterized cell image under the resource Check's "large cell area"
+   threshold (~500k pixels). Cap both the long dimension and the area to keep
+   the cell from tripping LargeCellBounds while still showing the content
+   readably. *)
+$rasterMaxLongDim = 1200
+$rasterMaxArea = 480000
+capRaster[img_] := If[ ! ImageQ[img], img,
+    Block[{w, h, longDim, area, scale},
+        {w, h} = ImageDimensions[img];
+        longDim = Max[w, h];
+        area = w h;
+        scale = Min[1, $rasterMaxLongDim / longDim, Sqrt[$rasterMaxArea / area]];
+        If[scale < 1, ImageResize[img, Round[scale {w, h}]], img]
+    ]
+]
+
 outputBoxes[res_, opts_] := Which[
     res === Null, Null,
     Head[res] === NotebookObject,
@@ -436,9 +452,9 @@ outputBoxes[res_, opts_] := Which[
            entire notebook. *)
         With[{img = Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 96]},
             Quiet @ NotebookClose[res];
-            ToBoxes @ If[ImageQ[img] && Last[ImageDimensions[img]] > 1400, ImageResize[img, {Automatic, 1400}], img]],
+            ToBoxes @ capRaster[img]],
     TrueQ[Lookup[opts, "screenshot", False]] && Head[res] === Notebook,
-        ToBoxes @ Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 144],
+        ToBoxes @ capRaster @ Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 144],
     True, ToBoxes[res]
 ]
 
