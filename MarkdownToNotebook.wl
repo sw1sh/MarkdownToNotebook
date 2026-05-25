@@ -405,20 +405,30 @@ outputBoxes[res_, opts_] := Which[
    (the Hold keeps args unevaluated). The text is "head::tag: <StringForm template>";
    notebook-syntax math escapes are stripped so the cell reads as plain text rather
    than raw "\!\(...\)" glyphs. *)
-(* The message template lives in Messages[head] as a rule "HoldPattern[MessageName[
-   head, tag]] :> template"; Replace pulls the template string out, and StringForm
-   substitutes the args (`1, `2, ...) so the rendered cell matches what the kernel
-   would print interactively. Falls back to "head::tag" alone if the template is not
-   yet registered (which happens for messages issued before their template loads). *)
+(* Render a captured message as the exact "MessageTemplate" TemplateBox the front end
+   produces interactively: TemplateBox[{<formatted-text-boxes>, "head", "tag",
+   Hold[args]}, "MessageTemplate"]. The template lives in Messages[head] as a rule
+   "HoldPattern[MessageName[head, tag]] :> template"; Replace pulls it out, StringForm
+   substitutes the args (`1, `2, ...) preserved as HoldForm so the typeset boxes show
+   the original "1/0" rather than the post-evaluation ComplexInfinity, and ToBoxes
+   converts the StringForm to the InterpretationBox the FE expects. Falls back to a
+   plain "head::tag" text cell if the template is not yet registered. *)
 messageCell[Hold[Message[MessageName[head_, tag_String], args___], _]] := Module[
-    {tmpl, cleanedArgs, text},
+    {tmpl, cleanedArgs, formattedBoxes},
     tmpl = Replace[MessageName[head, tag], Messages[head]];
+    If[ ! StringQ[tmpl],
+        Return @ Cell[SymbolName[head] <> "::" <> tag, "Message", "MSG"]
+    ];
     cleanedArgs = {args} /. HoldCompleteForm[x_] :> HoldForm[x];
-    text = If[StringQ[tmpl],
-        Quiet @ ToString[StringForm[tmpl, Sequence @@ cleanedArgs], OutputForm],
-        ""];
-    Cell[SymbolName[head] <> "::" <> tag <> If[text =!= "", ": " <> text, ""],
-        "Message", "MSG"]
+    (* ToBoxes[StringForm[...]] wraps in InterpretationBox; strip that to expose the
+       raw rendered string with its inline "\!\(...\)" typeset markup, which is the
+       form the front end parses to render math (FractionBox, etc.) in the message
+       cell exactly the way the kernel prints it interactively. *)
+    formattedBoxes = ToBoxes[StringForm[tmpl, Sequence @@ cleanedArgs]] /. InterpretationBox[b_, ___] :> b;
+    Cell[BoxData @ TemplateBox[
+        {formattedBoxes, SymbolName[head], tag, Hold[args]},
+        "MessageTemplate"
+    ], "Message", "MSG"]
 ]
 messageCell[hf_] := Cell[ToString[hf, InputForm], "Message", "MSG"]
 
