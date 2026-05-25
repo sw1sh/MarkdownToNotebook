@@ -439,14 +439,21 @@ accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res,
     Export[tmp, b["Code"], "Text"];
     (* capture every issued message (Hold[Message[...], qFlag]) via the message hook;
        Quiet still suppresses console printing. Filters:
-         - drop Internal` / Developer` heads (system internals the user never sees);
-         - drop General::newsym (fires whenever WL auto-creates a fresh symbol, which
-           our private-context evaluation does for every assignment - pure noise). *)
+         - keep only System` / $docContext / Global` heads (Internal` / Developer`
+           messages are noise the user never sees);
+         - drop a fixed set of package-author / kernel-bookkeeping warnings that
+           routinely fire during paclet load or private-context evaluation and have
+           nothing to do with the user's cell: General::newsym (auto-symbol creation),
+           General::shdw (context shadow), Pattern::patv (variable / fixed-length
+           pattern reuse - emitted by some library's package code), Syntax::sntxi
+           (interactive syntax warnings). *)
     Internal`HandlerBlock[
         {"Message", Function[evt,
             If[MatchQ[evt, Hold[Message[MessageName[h_Symbol /;
                         MatchQ[Context[h], "System`" | $docContext | "Global`"],
-                    tag_String /; ! MatchQ[tag, "newsym" | "shdw"]], ___], _]],
+                    tag_String /; ! MatchQ[tag,
+                        "newsym" | "shdw" | "patv" | "sntxi" | "rmnsm" | "remal"]],
+                    ___], _]],
                 AppendTo[msgs, evt]];
             True]},
         res = Quiet @ Get[tmp]
