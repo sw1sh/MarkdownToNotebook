@@ -106,7 +106,7 @@ to list, `DeleteObject` to clear).
 - Inline markdown links `[text](url)` -> `Hyperlink` `ButtonBox`, and
   `[sym](paclet:Pub/Name/ref/Sym)` -> a reference `Link` (palette *Link to URL*
   / *Custom URI*). **[done]**
-- Inferred-reference forms `` [`Symbol`] `` and `` [`Symbol`]() `` -> a code-styled
+- Inferred-reference forms `` [`Symbol`]() `` and `` [`Symbol`]() `` -> a code-styled
   `Link` button to the resolved `paclet:` URL in the notebook; in the `-out.md`
   twin the same forms are expanded to the public HTTPS URL
   (`reference.wolfram.com/language/ref/Symbol.html` for System symbols,

@@ -400,13 +400,38 @@ outputBoxes[res_, opts_] := Which[
     True, ToBoxes[res]
 ]
 
-accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res, tmp},
+(* a captured message -> a notebook "Message" cell. Internal`HandlerBlock["Message"]
+   passes "Hold[Message[head::tag, args], qFlag]" to the handler; we store it as-is
+   (the Hold keeps args unevaluated). The text is "head::tag: <StringForm template>";
+   notebook-syntax math escapes are stripped so the cell reads as plain text rather
+   than raw "\!\(...\)" glyphs. *)
+messageCell[Hold[Message[MessageName[head_, tag_String], ___], _]] := With[
+    {tmpl = MessageName[head, tag]},
+    Cell[SymbolName[head] <> "::" <> tag <> If[StringQ[tmpl], ": " <> tmpl, ""],
+        "Message", "MSG"]
+]
+messageCell[hf_] := Cell[ToString[hf, InputForm], "Message", "MSG"]
+
+accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res, tmp, msgs = {}},
     (* Get a temp package so every top-level statement runs (ToExpression on a
        multi-statement string only takes the first); Get returns the last value. *)
     tmp = FileNameJoin[{$TemporaryDirectory, "mtnb-cell-" <> IntegerString[Hash[code], 36] <> ".wl"}];
     Export[tmp, b["Code"], "Text"];
-    res = Quiet @ Get[tmp];
-    <|"code" -> code, "out" -> Append[state["out"], Hash[code] -> outputBoxes[res, b["Options"]]]|>
+    (* capture every issued message (Hold[Message[...], qFlag]) via the message hook;
+       Quiet still suppresses console printing. Only record messages whose head lives
+       in System` or the document's own context - Internal` / Developer` messages are
+       noise the user never sees in interactive use. *)
+    Internal`HandlerBlock[
+        {"Message", Function[evt,
+            If[MatchQ[evt, Hold[Message[MessageName[h_Symbol /;
+                    MatchQ[Context[h], "System`" | $docContext | "Global`"], _String], ___], _]],
+                AppendTo[msgs, evt]];
+            True]},
+        res = Quiet @ Get[tmp]
+    ];
+    msgs = DeleteDuplicatesBy[msgs, Replace[#, Hold[Message[name_, ___], _] :> ToString[name, InputForm]] &];
+    <|"code" -> code,
+      "out" -> Append[state["out"], Hash[code] -> <|"out" -> outputBoxes[res, b["Options"]], "msgs" -> msgs|>]|>
 ]
 
 (* a front end is active for the whole pass so an example may open the notebook it
@@ -416,11 +441,19 @@ evaluateAll[cells_List, ctx_String, ctxPath_List] := Block[{$Context = ctx, $Con
 ]
 
 (* attach each executable block's output (by cumulative hash) so builders read
-   block["OutputBoxes"] directly instead of recomputing hashes. *)
-annotateOutputs[blocks_List, hashes_List, outputs_] := Block[{i = 0},
+   block["OutputBoxes"] / block["Messages"] directly instead of recomputing hashes.
+   The cache entry is normally an Association <|"out" -> boxes, "msgs" -> {...}|>;
+   accept the legacy raw-boxes form too (older cache entries with no message data). *)
+annotateOutputs[blocks_List, hashes_List, outputs_] := Block[{i = 0, entry, out, msgs},
     Map[
         b |-> If[ executableQ[b],
-            (i += 1; Append[b, "OutputBoxes" -> Lookup[outputs, hashes[[i]], Missing[]]]),
+            (i += 1;
+             entry = Lookup[outputs, hashes[[i]], Missing[]];
+             {out, msgs} = If[AssociationQ[entry] && KeyExistsQ[entry, "out"],
+                 {entry["out"], Lookup[entry, "msgs", {}]},
+                 {entry, {}}
+             ];
+             Append[Append[b, "OutputBoxes" -> out], "Messages" -> msgs]),
             b
         ],
         blocks
@@ -565,15 +598,15 @@ extraOutputOpts[block_] := If[
     {}
 ]
 
-exampleIO[code_String, outBoxes_, n_Integer, outOpts_List : {}] := Block[{
-    inCell = Cell[BoxData[inputBoxes[code]], "Input", CellLabel -> "In[" <> ToString[n] <> "]:= "]
+exampleIO[code_String, outBoxes_, n_Integer, outOpts_List : {}, msgs_List : {}] := Block[{
+    inCell = Cell[BoxData[inputBoxes[code]], "Input", CellLabel -> "In[" <> ToString[n] <> "]:= "],
+    msgCells = messageCell /@ msgs,
+    outCell
 },
     If[ MissingQ[outBoxes] || outBoxes === Null,
-        {inCell},
-        {Cell[CellGroupData[{
-            inCell,
-            Cell[BoxData[outBoxes], "Output", CellLabel -> "Out[" <> ToString[n] <> "]= ", Sequence @@ outOpts]
-        }, Open]]}
+        Join[{inCell}, msgCells],
+        outCell = Cell[BoxData[outBoxes], "Output", CellLabel -> "Out[" <> ToString[n] <> "]= ", Sequence @@ outOpts];
+        {Cell[CellGroupData[Flatten[{inCell, msgCells, outCell}], Open]]}
     ]
 ]
 
@@ -609,7 +642,7 @@ withCellFlag[block_, cells_List] := With[{f = flagCell[Lookup[block["Options"], 
 
 (* an example's cells (Input / Output), prefixed with its per-cell flag banner *)
 exampleIOFor[block_, n_Integer] :=
-    withCellFlag[block, exampleIO[block["Code"], block["OutputBoxes"], n, extraOutputOpts[block]]]
+    withCellFlag[block, exampleIO[block["Code"], block["OutputBoxes"], n, extraOutputOpts[block], Lookup[block, "Messages", {}]]]
 
 (* a document-level flag banner ("Flag" frontmatter) prepended to the notebook *)
 applyDocFlag[nb_, ""] := nb
@@ -1269,9 +1302,12 @@ inlineTextData[text_String] := Replace[
             "![" ~~ a : Shortest[Except["]"] ...] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> inlineImage[a, u],
             (* allow an empty URL "[`Symbol`]()" - that is the pandoc / GitHub-renderable
                inferred form (an empty link is at least a recognisable link element in
-               markdown viewers); linkInline routes it to linkInferred. *)
+               markdown viewers); linkInline routes it to linkInferred. The bare
+               "[`Symbol`]" without parens is *not* auto-linked: that follows strict
+               markdown semantics ("[X]" alone is literal bracketed text) and avoids
+               surprising linkifying of expressions like "[`Import`]["doc.md"]" where
+               the author wanted only inline code. *)
             "[" ~~ t : Shortest[Except["]"] ..] ~~ "](" ~~ u : Shortest[Except[")"] ...] ~~ ")" :> linkInline[t, u],
-            "[`" ~~ t : Shortest[Except["`"] ..] ~~ "`]" :> linkInferred[t],
             "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
             "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
             "$$" ~~ m : Shortest[Except["$"] ..] ~~ "$$" :> mathInline[m],

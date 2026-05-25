@@ -35,7 +35,7 @@ contents of that local file or URL, resolved relative to this document.
 - The layout is the document's own `Template` frontmatter key - `FunctionResource`, `Symbol`, `Guide`, `TechNote`, `Paclet`, `Example`, or `Default` - so the source declares its own layout.
 - `FunctionResource` fills the official `FunctionResourceDefinition.nb` template (keeping its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates; `Default` maps headings and code to standard notebook styles.
 - The *frontmatter* is a YAML-style `key: value` header fenced by `---` lines at the very top of the document - the [front matter](https://jekyllrb.com/docs/front-matter/) convention static-site generators use - carrying the resource metadata. Its keys mirror the chosen template's slots (`Name`, `Description`, `Keywords`, `Categories`, `ContributedBy`, `SeeAlso`, `Links`, ...), so the author fills metadata, never cell styles.
-- The optional second argument selects the result: omitted (or `"Notebook"`) returns the [`Notebook`], `"Association"` returns the parsed structure, a `.nb` file name writes the notebook, and a `.md` file name writes a *markdown twin* - the same document with every evaluated output rasterized to an image beside it.
+- The optional second argument selects the result: omitted (or `"Notebook"`) returns the [`Notebook`](), `"Association"` returns the parsed structure, a `.nb` file name writes the notebook, and a `.md` file name writes a *markdown twin* - the same document with every evaluated output rasterized to an image beside it.
 - The function takes one option:
 
 | Option | Default | |
@@ -43,10 +43,10 @@ contents of that local file or URL, resolved relative to this document.
 | `"Evaluate"` | `True` | evaluate the example cells and keep their output; `False` leaves them as input only, which a self-referential document passes to convert its own source without re-running its own examples |
 
 - A `Flag` frontmatter key flags the whole document and a code cell's `#| flag:` option flags that cell, with one of the documentation build's flags - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` - the front end's Futurize / Excise toolbar buttons, written as the build's banner cell.
-- Evaluated example outputs are cached as a [`PersistentSymbol`] per cell at the `"Local"` [`PersistenceLocation`], keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
-- Manage that cache the standard way: [`PersistentObjects`]["MarkdownToNotebook/ExampleOutput/*", "Local"] lists it, [`DeleteObject`] clears it, and [`$PersistencePath`] / [`PersistenceLocation`] relocate it.
+- Evaluated example outputs are cached as a [`PersistentSymbol`]() per cell at the `"Local"` [`PersistenceLocation`](), keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
+- Manage that cache the standard way: [`PersistentObjects`]()["MarkdownToNotebook/ExampleOutput/*", "Local"] lists it, [`DeleteObject`]() clears it, and [`$PersistencePath`]() / [`PersistenceLocation`]() relocate it.
 - The source lives on GitHub, which renders the markdown directly: [github.com/sw1sh/MarkdownToNotebook](https://github.com/sw1sh/MarkdownToNotebook).
-- Running the function on this document - [`Get`] the `.wl`, then `MarkdownToNotebook["MarkdownToNotebook.md", "MarkdownToNotebook.nb"]` - reproduces this very definition notebook; that is the loop `build.wls` runs.
+- Running the function on this document - [`Get`]() the `.wl`, then `MarkdownToNotebook["MarkdownToNotebook.md", "MarkdownToNotebook.nb"]` - reproduces this very definition notebook; that is the loop `build.wls` runs.
 
 Individual code cells carry their own options as `#|` comment lines at the top of the cell - the [Quarto](https://quarto.org/docs/computations/execution-options.html) cell-option convention - one `key: value` per line:
 
@@ -60,9 +60,9 @@ Individual code cells carry their own options as `#|` comment lines at the top o
 
 ## Usage
 
-`MarkdownToNotebook[source]` converts a literate-markdown *source* into a Wolfram notebook and returns the [`Notebook`] expression.
+`MarkdownToNotebook[source]` converts a literate-markdown *source* into a Wolfram notebook and returns the [`Notebook`]() expression.
 
-`MarkdownToNotebook[source, "Association"]` returns the parsed structure as an [`Association`] instead of the notebook.
+`MarkdownToNotebook[source, "Association"]` returns the parsed structure as an [`Association`]() instead of the notebook.
 
 `MarkdownToNotebook[source, "file.nb"]` writes the notebook to the `.nb` *file* and returns the file.
 
@@ -70,7 +70,7 @@ Individual code cells carry their own options as `#|` comment lines at the top o
 
 ## Basic Examples
 
-Convert a markdown string into a notebook. The result is the explicit [`Notebook`] expression:
+Convert a markdown string into a notebook. The result is the explicit [`Notebook`]() expression:
 
 ```wl
 MarkdownToNotebook["# Title\n\nA paragraph.\n\n## Section\n\nMore text."]
@@ -138,14 +138,14 @@ MarkdownToNotebook["The Pythagorean identity:\n\n$$ a^2 + b^2 = c^2 $$"]
 Three link forms are supported:
 
 - `[label](url)` makes a prose hyperlink.
-- `` [`Symbol`] `` infers a documentation reference (a backticked label with no target).
+- `` [`Symbol`]() `` infers a documentation reference (a backticked label with no target).
 - `` [`Symbol`](url) `` makes a code-styled explicit link.
 
 For example:
 
 ```wl
 #| screenshot: true
-MarkdownToNotebook["See [`Range`] and the [Wolfram site](https://www.wolfram.com)."]
+MarkdownToNotebook["See [`Range`]() and the [Wolfram site](https://www.wolfram.com)."]
 ```
 
 ### Lists and tables
@@ -194,7 +194,7 @@ The title defaults to `Output`; the special title `"papertear"` keeps `Output` a
 
 ### Returning a notebook, an association, or a file
 
-Omitted (or `"Notebook"`) returns the [`Notebook`]; `"Association"` returns the parsed structure for inspection; any other string writes the notebook to that file and returns it. The whole association exposes the notebook, the metadata, the section list, and the chosen template:
+Omitted (or `"Notebook"`) returns the [`Notebook`](); `"Association"` returns the parsed structure for inspection; any other string writes the notebook to that file and returns it. The whole association exposes the notebook, the metadata, the section list, and the chosen template:
 
 ```wl
 MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Association"]
@@ -248,13 +248,13 @@ MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/mai
 
 ## Properties and Relations
 
-The Wolfram Language already reads markdown into a plain notebook - [`Import`]["doc.md", "Notebook"], or [`ImportString`][markdown, {"Markdown", "Notebook"}] for a string. `MarkdownToNotebook` builds on that idea and adds the resource layer: the layout chosen from frontmatter, the metadata slots, cell options, and evaluated and cached example cells. The built-in import of the same snippet gives just the bare cells (it does parse inline TeX math, the same `$x$` convention used here):
+The Wolfram Language already reads markdown into a plain notebook - <code>[`Import`]()["doc.md", "Notebook"]</code>, or <code>[`ImportString`]()[markdown, {"Markdown", "Notebook"}]</code> for a string. `MarkdownToNotebook` builds on that idea and adds the resource layer: the layout chosen from frontmatter, the metadata slots, cell options, and evaluated and cached example cells. The built-in import of the same snippet gives just the bare cells (it does parse inline TeX math, the same `$x$` convention used here):
 
 ```wl
 ImportString["# Title\n\nText with inline math $\\sin x$.", {"Markdown", "Notebook"}]
 ```
 
-`FunctionResource` then fills the same template [`CreateNotebook`]["FunctionResource"] opens (publishable with [`ResourceSubmit`]), and `Symbol`/`Guide` fill the DocumentationTools templates `DocumentationBuild` turns into reference pages.
+`FunctionResource` then fills the same template [`CreateNotebook`]()["FunctionResource"] opens (publishable with [`ResourceSubmit`]()), and `Symbol`/`Guide` fill the DocumentationTools templates `DocumentationBuild` turns into reference pages.
 
 ## Possible Issues
 

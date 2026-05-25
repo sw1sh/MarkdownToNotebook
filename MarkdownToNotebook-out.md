@@ -151,7 +151,7 @@ For example:
 
 ```wl
 #| screenshot: True
-MarkdownToNotebook["See [`Range`] and the [Wolfram site](https://www.wolfram.com)."]
+MarkdownToNotebook["See [`Range`]() and the [Wolfram site](https://www.wolfram.com)."]
 ```
 
 ![output](images/MarkdownToNotebook-out-8.png)
@@ -276,7 +276,7 @@ MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/mai
 
 ## Properties and Relations
 
-The Wolfram Language already reads markdown into a plain notebook - [`Import`](https://reference.wolfram.com/language/ref/Import.html)["doc.md", "Notebook"], or [`ImportString`](https://reference.wolfram.com/language/ref/ImportString.html)[markdown, {"Markdown", "Notebook"}] for a string. `MarkdownToNotebook` builds on that idea and adds the resource layer: the layout chosen from frontmatter, the metadata slots, cell options, and evaluated and cached example cells. The built-in import of the same snippet gives just the bare cells (it does parse inline TeX math, the same `$x$` convention used here):
+The Wolfram Language already reads markdown into a plain notebook - <code>[`Import`](https://reference.wolfram.com/language/ref/Import.html)["doc.md", "Notebook"]</code>, or <code>[`ImportString`](https://reference.wolfram.com/language/ref/ImportString.html)[markdown, {"Markdown", "Notebook"}]</code> for a string. `MarkdownToNotebook` builds on that idea and adds the resource layer: the layout chosen from frontmatter, the metadata slots, cell options, and evaluated and cached example cells. The built-in import of the same snippet gives just the bare cells (it does parse inline TeX math, the same `$x$` convention used here):
 
 ```wl
 ImportString["# Title\n\nText with inline math $\\sin x$.", {"Markdown", "Notebook"}]

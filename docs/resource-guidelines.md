@@ -34,7 +34,7 @@ when in doubt - they are the authority:
   `OptionsPattern`/`OptionValue` for options, only the documented symbol(s) facing
   the user.
 - **Links** - make real hyperlinks, not bare URLs. -> `[label](url)` for prose
-  links; `` [`Symbol`] `` (or `` [`Symbol`]() ``) to infer a reference link;
+  links; `` [`Symbol`]() `` (or `` [`Symbol`]() ``) to infer a reference link;
   `` [`Symbol`](url) `` to link explicitly; `SeeAlso` / `Links` / `RelatedGuides`
   frontmatter for the metadata lists.
 
