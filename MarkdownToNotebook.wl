@@ -2223,8 +2223,14 @@ overviewNotebook[data_] := Block[{
         Cell[If[title === "", "XXXX", title], "TOCDocumentTitle", o];
     tocCells = overviewBodyCells[blocks, paclet];
     tocBlocks = groupTocCells[tocCells];
-    nb = nb /. Cell[CellGroupData[{title : Cell[_, "TOCDocumentTitle", ___], _Cell | _ ..}, st_], go___] :>
-        Cell[CellGroupData[Prepend[tocBlocks, title], st], go];
+    (* Force the title group's state to Open. The empty
+       OverviewBaseTemplateExt.nb wraps its whole TOC in
+       CellGroupData[..., Closed] (the author opens the title once and starts
+       authoring), but a generated overview's body IS the content the reader
+       is meant to see - leaving it Closed hides the entire TOC behind a
+       click on the title. *)
+    nb = nb /. Cell[CellGroupData[{titleCell : Cell[_, "TOCDocumentTitle", ___], _Cell | _ ..}, _], go___] :>
+        Cell[CellGroupData[Prepend[tocBlocks, titleCell], Open], go];
     nb = fillDocList[nb, "Keywords", asList @ Lookup[meta, "Keywords", {}]];
     nb = nb /. {
         Cell["XXXX", _, ___] :> Nothing,
