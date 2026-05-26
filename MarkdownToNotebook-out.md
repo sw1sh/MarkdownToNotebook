@@ -1392,8 +1392,18 @@ codeInlineCell[inner_String] := Block[{sig, head, url, boxes, unescaped},
        <code> would land in the .nb as literal "\*" instead of "*", which a
        markdown viewer renders as just "*" but the notebook would show the
        backslash. Backticked spans skip this because backticks freeze content
-       by design - "\*" in `` `code` `` is meant to be literal. *)
-    unescaped = StringReplace[inner, "\\" ~~ c : PunctuationCharacter :> c];
+       by design - "\*" in `` `code` `` is meant to be literal.
+
+       Wolfram named-character escapes ("\[Theta]", "\[CircleTimes]", ...)
+       share the leading "\[" with the markdown "\[" escape for a literal "[",
+       so list the Wolfram-name rule FIRST: at a "\[CircleTimes]" position
+       it matches and rebuilds the escape verbatim, blocking the punctuation
+       rule from eating the "\" and turning the kernel char into a stray
+       "[CircleTimes]" that the inferred-link parser would then auto-link. *)
+    unescaped = StringReplace[inner, {
+        "\\[" ~~ name : (LetterCharacter ..) ~~ "]" :> "\\[" <> name <> "]",
+        "\\" ~~ c : PunctuationCharacter :> c
+    }];
     sig = mathArgsToTemplate @ unwrapMarkdownSig @ unescaped;
     head = First[StringCases[sig,
         StartOfString ~~ h : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) :> h, 1], ""];
@@ -2857,3 +2867,18 @@ VerificationTest[
 ```
 
 ![output](images/MarkdownToNotebook-out-36.png)
+
+The unescape preserves Wolfram named-character escapes (`\[CircleTimes]`, `\[Theta]`, ...) - they share the leading `\[` with the markdown `\[` punctuation escape, so the Wolfram-name pattern is matched first and rebuilt verbatim (regression: the punctuation rule ate the leading `\`, leaving a stray `[CircleTimes]` that the inferred-link parser then auto-linked into a ButtonBox):
+
+```wl
+VerificationTest[
+    ! FreeQ[
+        MarkdownToNotebook["A <code>a \\[CircleTimes] b</code> reference."],
+        "\[CircleTimes]"
+    ],
+    True,
+    TestID -> "`<code>\\[Name]</code>` preserves the Wolfram named-character escape"
+]
+```
+
+![output](images/MarkdownToNotebook-out-37.png)
