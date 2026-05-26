@@ -33,30 +33,35 @@ recordResult[name_String, ok_] := (
 (* === extracted regression suite ===
    litParse + sectionsFrom give us the parsed "## Tests" section directly; each
    wl block's "Code" field is the VerificationTest source. ToExpression
-   evaluates it; a TestResultObject reports its own pass / fail. *)
+   evaluates it; a TestResultObject reports its own pass / fail. Both
+   MarkdownToNotebook.md (forward-direction tests) and NotebookToMarkdown.md
+   (walker tests) carry a ## Tests section that doubles as the resource's
+   VerificationTests slot, so we scrape both here. *)
 
-print["regressions (from MarkdownToNotebook.md ## Tests):"]
-
-testBlocks = With[{
-    parsed = litParse @ Import[FileNameJoin[{dir, "MarkdownToNotebook.md"}], "Text"]
+testBlocksFrom[file_String] := With[{
+    parsed = litParse @ Import[FileNameJoin[{dir, file}], "Text"]
 },
     Cases[Lookup[sectionsFrom[parsed["Blocks"]], "tests", {}], b_ /; codeBlockQ[b]]
 ]
 
-Scan[
-    b |-> Block[{result, name, ok},
-        result = Quiet @ ToExpression[b["Code"]];
-        name = If[Head[result] === TestObject, result["TestID"], "(no TestID)"];
-        ok = Head[result] === TestObject && result["Outcome"] === "Success";
-        recordResult[name, ok];
-        If[ ! ok && Head[result] === TestObject,
-            print["     expected: ", ToString[result["ExpectedOutput"], InputForm],
-                  "\n     actual:   ", ToString[result["ActualOutput"], InputForm],
-                  "\n     outcome:  ", result["Outcome"]]
-        ]
-    ],
-    testBlocks
+runTestBlock[b_] := Block[{result, name, ok},
+    result = Quiet @ ToExpression[b["Code"]];
+    name = If[Head[result] === TestObject, result["TestID"], "(no TestID)"];
+    ok = Head[result] === TestObject && result["Outcome"] === "Success";
+    recordResult[name, ok];
+    If[ ! ok && Head[result] === TestObject,
+        print["     expected: ", ToString[result["ExpectedOutput"], InputForm],
+              "\n     actual:   ", ToString[result["ActualOutput"], InputForm],
+              "\n     outcome:  ", result["Outcome"]]
+    ]
 ]
+
+print["regressions (from MarkdownToNotebook.md ## Tests):"]
+Scan[runTestBlock, testBlocksFrom["MarkdownToNotebook.md"]]
+
+print[""]
+print["regressions (from NotebookToMarkdown.md ## Tests):"]
+Scan[runTestBlock, testBlocksFrom["NotebookToMarkdown.md"]]
 
 (* === walker smoke pass ===
    The walker is best-effort: it reads the rendered cells, not the original

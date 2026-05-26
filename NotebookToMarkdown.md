@@ -92,3 +92,49 @@ With[{md = "# Demo\n\n## Section\n\nA paragraph.\n\n```wl\nRange[5]^2\n```\n"},
 ```
 
 <!-- => True -->
+
+## Tests
+
+Each `wl` cell in this section is an explicit `VerificationTest[code, expected, TestID -> …]` expression that becomes one Input cell in the resource's `VerificationTests` slot (the docked *Run Tests* button evaluates them). The repo's `tests.wls` scrapes this section and runs the same assertions out-of-band, so the in-notebook button and the CI script share a single source of truth.
+
+An `InlineFormula` cell wrapping a `FormBox` is emitted as `$math$`, not as a backticked code span - so a Greek letter in inline math round-trips with its `$…$` delimiters (regression: the previous handler wrapped every `InlineFormula` content in backticks, so the recovered math came out as ``` `$θ$` ``` with extra delimiters):
+
+```wl
+VerificationTest[
+    StringContainsQ[
+        NotebookToMarkdown @ Notebook[{
+            Cell[TextData[{"angle ", Cell[BoxData[FormBox["\[Theta]", TraditionalForm]], "InlineFormula"]}], "Text"]
+        }],
+        "$\[Theta]$"
+    ],
+    True,
+    TestID -> "InlineFormula+FormBox -> $math$ (no backticks)"
+]
+```
+
+A code cell's original surface layout is preserved by walking the `BoxData` tree directly - so a multi-statement Input cell with literal `"\n"` separators round-trips with its line breaks intact (regression: an earlier `MakeExpression`-based deparse choked on multi-statement boxes and fell back to literal `RawBoxes[RowBox[…]]` output):
+
+```wl
+VerificationTest[
+    StringContainsQ[
+        NotebookToMarkdown @ Notebook[{
+            Cell[BoxData[RowBox[{RowBox[{"a", " ", "=", " ", "1"}], ";", "\n", RowBox[{"b", " ", "=", " ", "2"}], ";"}]], "Input"]
+        }],
+        "a = 1;\nb = 2;"
+    ],
+    True,
+    TestID -> "multi-statement Input cell preserves the \"\\n\" between statements"
+]
+```
+
+Decoration cells the resource template injects are silently dropped - the help-bubble opener that sits inside a heading's `TextData` is a `Cell[BoxData[PaneSelectorBox[…]]]`, never authored content, so the recovered heading is just the title (regression: the opener leaked through as raw box source jammed onto the heading line):
+
+```wl
+VerificationTest[
+    StringTrim @ NotebookToMarkdown @ Notebook[{
+        Cell[TextData[{"Caption", Cell[BoxData[PaneSelectorBox[{True -> "x"}, Dynamic[True]]], "Section"]}], "Section"]
+    }],
+    "## Caption",
+    TestID -> "drops MoreInfoOpener-shaped decoration cells from heading TextData"
+]
+```
