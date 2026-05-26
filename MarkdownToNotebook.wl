@@ -755,15 +755,68 @@ flagCell[_] := Nothing
 withCellFlag[block_, cells_List] := With[{f = flagCell[Lookup[block["Options"], "flag", ""]]},
     If[f === Nothing, cells, Prepend[cells, f]]]
 
-(* an example's cells (Input / Output), prefixed with its per-cell flag banner.
-   "#| input: false" drops the Input cell - the example renders as just its
-   captured Output (the Demonstration-snapshot use case). *)
+(* "#| excluded: true" appends the "Excluded" cell style. The resource scraper
+   strips any Cell[..., "Excluded", ...] from the published resource (vExclusions
+   in ResourceSystemClient`DefinitionNotebook`Scraping`), but the cell stays in
+   the source .nb so the author can keep work-in-progress or reviewer notes that
+   travel with the document but never ship.
+
+   Split a Cell's args into "leading style strings" and "trailing options"
+   manually - the `Cell[content_, styles___String, opts___]` pattern doesn't
+   bind styles greedily (___String prefers a zero match when followed by ___),
+   so we'd end up emitting Cell[content, "Excluded", "Input", ...] with the
+   modifier style ahead of the base. *)
+splitCellArgs[args_List] := Block[{styles, rest},
+    styles = TakeWhile[args, StringQ];
+    rest = Drop[args, Length[styles]];
+    {styles, rest}
+]
+
+withExtraCellStyle[Cell[CellGroupData[cells_List, st_], go___], style_String] :=
+    Cell[CellGroupData[Map[withExtraCellStyle[#, style] &, cells], st], go]
+withExtraCellStyle[Cell[content_, args___], style_String] := Block[
+    {parts = splitCellArgs[{args}]},
+    Cell[content, Sequence @@ parts[[1]], style, Sequence @@ parts[[2]]]
+]
+withExtraCellStyle[other_, _] := other
+
+applyExcluded[block_, cells_List] := If[
+    TrueQ[Lookup[block["Options"], "excluded", False]],
+    Map[withExtraCellStyle[#, "Excluded"] &, cells],
+    cells
+]
+
+(* "#| hidden: true" closes the cell on the *published* web page but keeps it
+   open in the downloadable example notebook - that is, CellOpen -> False plus
+   the "HiddenMaterial" modifier style (which the FunctionResource stylesheet
+   wraps in a green-edged frame with a "hidden" label so the author sees it
+   is marked). The cell still scrapes into the deployed resource, unlike
+   "excluded" which strips it entirely. *)
+withHiddenOptions[Cell[CellGroupData[cells_List, _], go___]] :=
+    Cell[CellGroupData[Map[withHiddenOptions, cells], Closed], go]
+withHiddenOptions[Cell[content_, args___]] := Block[
+    {parts = splitCellArgs[{args}]},
+    Cell[content, Sequence @@ parts[[1]], "HiddenMaterial",
+         Sequence @@ parts[[2]], CellOpen -> False]
+]
+withHiddenOptions[other_] := other
+
+applyHidden[block_, cells_List] := If[
+    TrueQ[Lookup[block["Options"], "hidden", False]],
+    Map[withHiddenOptions, cells],
+    cells
+]
+
+(* an example's cells (Input / Output), prefixed with its per-cell flag banner
+   and decorated with any "excluded" / "hidden" per-cell tag. "#| input: false"
+   drops the Input cell - the example renders as just its captured Output (the
+   Demonstration-snapshot use case). *)
 exampleIOFor[block_, n_Integer] :=
-    withCellFlag[block, exampleIO[
+    applyExcluded[block, applyHidden[block, withCellFlag[block, exampleIO[
         block["Code"], block["OutputBoxes"], n,
         extraOutputOpts[block], Lookup[block, "Messages", {}],
         Lookup[block["Options"], "input", True] === False
-    ]]
+    ]]]]
 
 (* a document-level flag banner ("Flag" frontmatter) prepended to the notebook *)
 applyDocFlag[nb_, ""] := nb

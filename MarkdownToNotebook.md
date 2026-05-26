@@ -59,6 +59,8 @@ Individual code cells carry their own options as `#|` comment lines at the top o
 | `tear` | render the output as a torn-paper screenshot; a number sets the visible height in points |
 | `flag` | mark the cell with a build flag - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` |
 | `input` | `input: false` drops the Input cell and keeps only the captured output - the Demonstration snapshot convention, where the snapshot is the *rendered Manipulate panel* at a fixed parameter state |
+| `excluded` | `excluded: true` appends the `"Excluded"` cell style; the resource scraper strips the cell from the published resource but it stays in the source `.nb` (the cell-tools *Mark as Excluded* button) |
+| `hidden` | `hidden: true` adds the `"HiddenMaterial"` modifier style and sets `CellOpen -> False`; the cell is closed on the published web page but open in the downloadable example notebook (the cell-tools *Mark as Hidden* button) |
 
 ## Usage
 
@@ -437,6 +439,42 @@ VerificationTest[
     ],
     True,
     TestID -> "`<code>\\[Name]</code>` preserves the Wolfram named-character escape"
+]
+```
+
+The `#| excluded: true` cell option appends the `"Excluded"` style after the cell's base style; the scraper strips any `Cell[..., "Excluded", ...]` from the published resource but the cell stays in the authoring `.nb`:
+
+```wl
+VerificationTest[
+    MatchQ[
+        FirstCase[
+            MarkdownToNotebook["## Demo\n\n```wl\n#| excluded: true\nRange[3]\n```", "Evaluate" -> False],
+            Cell[_, "Input", ___],
+            Missing[],
+            Infinity
+        ],
+        Cell[_, "Input", "Excluded", ___]
+    ],
+    True,
+    TestID -> "#\\| excluded: true appends \"Excluded\" after the base \"Input\" style"
+]
+```
+
+The `#| hidden: true` cell option adds the `"HiddenMaterial"` modifier style and `CellOpen -> False` so the cell renders closed on the published web page (and open in the downloadable example notebook):
+
+```wl
+VerificationTest[
+    MatchQ[
+        FirstCase[
+            MarkdownToNotebook["## Demo\n\n```wl\n#| hidden: true\nRange[3]\n```", "Evaluate" -> False],
+            Cell[_, "Input", ___],
+            Missing[],
+            Infinity
+        ],
+        Cell[_, "Input", "HiddenMaterial", ___, CellOpen -> False, ___]
+    ],
+    True,
+    TestID -> "#\\| hidden: true adds \"HiddenMaterial\" + CellOpen -> False"
 ]
 ```
 

@@ -74,8 +74,8 @@ The secondary row is the `"ToolsGridTemplate"`; it shows when `TaggingRules.Tool
 | Group | Button | Tooltip | Action | Markdown equivalent | Status |
 |---|---|---|---|---|---|
 | Cells | Mark/unmark as comments | "Mark/unmark selected cells as comments" | toggles `CellTags -> "Comment"` on selection | edit the markdown; no analogue (review-only) | n/a (authoring) |
-| Cells | Mark/unmark as excluded | "Mark/unmark selected cells as excluded; Excluded cells will not appear anywhere in the published resource except for the definition notebook" | toggles `CellTags -> "ExcludedCell"` | `#\| eval: false` (or just omit the cell) | done |
-| Cells | Mark/unmark as hidden | "Hidden input cells will be closed on the published web page but will remain open in the downloadable example notebook" | toggles `CellOpen -> False` on the input | (the converter does this automatically for Input/Output groups) | done |
+| Cells | Mark/unmark as excluded | "Mark/unmark selected cells as excluded; Excluded cells will not appear anywhere in the published resource except for the definition notebook" | appends the `"Excluded"` style; the scraper strips any `Cell[…, "Excluded", …]` (see `vExclusions` in `ResourceSystemClient`DefinitionNotebook`Scraping`) | `#\| excluded: true` | done |
+| Cells | Mark/unmark as hidden | "Hidden input cells will be closed on the published web page but will remain open in the downloadable example notebook" | adds the `"HiddenMaterial"` modifier style + `CellOpen -> False` | `#\| hidden: true` | done |
 | Cells | Insert comment for reviewer | "Insert comment for reviewer" | inserts a `Cell["", "ReviewerComment"]` | author the prose in the appropriate section | n/a (authoring) |
 | Cells | Reply | "Reply »" | replies to a `ReviewerComment` | n/a (review) | n/a |
 | Cells | Click for more information | "Click for more information" | opens the cell-tool tutorial | n/a | n/a |

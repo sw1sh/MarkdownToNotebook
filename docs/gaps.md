@@ -13,8 +13,8 @@ loses a distinction the palette draws; "Missing" = no md form at all.
 | ~~**Missing**: `Overview` template~~ **Done** | "New Overview Page" + `TOCChapter` / `TOCSection` / `TOCSubsection` / `TOCSubsubsection` styles + `GenerateOverviewDialog[]` | `Template: Overview`; heading levels map `#`/`##`/`###`/`####`/`#####` -> `TOCDocumentTitle` / `TOCChapter` / `TOCSection` / `TOCSubsection` / `TOCSubsubsection`; list items become TOC leaves one level deeper than the surrounding heading; each entry's `[label](paclet:…)` becomes a clickable `ButtonBox` (worked sample: `examples/AccessibleColors/docs/Tutorials/Overview.md`) | done |
 | **Missing**: TooltipBox annotations | "Annotate" / "Annotation Search ↑↓" / "Annotation Remove" | no md form | inline tooltips on a span of prose; usually authoring scratchwork |
 | **Missing**: Reviewer comments | "Insert comment for reviewer" / "Reply »" cells | no md form | a review-loop construct; the markdown source is the canonical artifact, so reviews don't round-trip |
-| **Missing**: `Excluded` cell tag | cell-tools "Mark/unmark as excluded" | (close, not equivalent: `#\| eval: false`) | excluded cells stay in the source notebook but are stripped from the scraped resource; `eval: false` keeps the cell visible (just doesn't run it) |
-| **Missing**: `Hidden` cell with `CellOpen -> False` only on the *published* page | cell-tools "Mark/unmark as hidden" | no md form | the input is shown when downloaded but closed on the web page; the converter groups input+output but doesn't distinguish "shown vs hidden when published" |
+| ~~**Missing**: `Excluded` cell tag~~ **Done** | cell-tools "Mark/unmark as excluded" | `#\| excluded: true` (appends `"Excluded"` after the base style; the scraper strips the cell from the deployed resource but it stays in the source `.nb`) | done |
+| ~~**Missing**: `Hidden` cell with `CellOpen -> False`~~ **Done** | cell-tools "Mark/unmark as hidden" | `#\| hidden: true` (adds the `"HiddenMaterial"` modifier style + `CellOpen -> False`; closed on the published web page, open in the downloadable notebook) | done |
 | **Lossy**: Span First Column | `TableSpanToggle[]` | n/a in pipe tables | GFM pipe tables can't span cells - if you need a wide first-column label, change the layout |
 | **Lossy**: bulk paclet-wide rewrites | `SetPacletApplyFunction[...]` (every page in the paclet) | no md form | rewrites all pages' guide listings or symbol classifications at once; the markdown equivalent is a sed across `docs/**/*.md` |
 | **Lossy**: per-section MoreInfo bubbles | the `?` opener next to each section heading | not authored from md | the resource template injects them; both the forward converter and `NotebookToMarkdown` ignore them |
@@ -65,7 +65,7 @@ loses a distinction the palette draws; "Missing" = no md form at all.
 | ✓ Done | Check / Preview | "Check" → `CheckDefinitionNotebook` / "Preview" → `PreviewResource` | `check.wls` / `build-out.wls` (the rendered twin) |
 | ⚠ Lossy | Deploy ▾ submenu options (cloud public / cloud private / local / session-only) | `DeployResource[..., Local -> .., "Public" -> ..]` | `examples/build.wls` is the *public cloud* branch; the others are one-line variants |
 | ⚠ Lossy | Submit / Submit Update | `SubmitRepository[nbo]` / `SubmitRepositoryUpdate[nbo]` | `ResourceSubmit` the scraped `ResourceObject` by hand |
-| ✗ Missing | Excluded / Hidden cell tags | cell-tools toggles | `#\| eval: false` covers "don't run", not "scrape out" or "closed when published" |
+| ✓ Done | Excluded / Hidden cell tags | cell-tools toggles | `#\| excluded: true` (stripped by the scraper) / `#\| hidden: true` (`HiddenMaterial` + `CellOpen -> False`); `#\| eval: false` is still distinct ("don't run", neither stripped nor closed) |
 | ✗ Missing | Reviewer comments / replies | "Insert comment for reviewer" / "Reply »" | n/a |
 
 `Prompt`, `LLMTool`, `Example`, `Data` share the same shell - the same
@@ -104,14 +104,14 @@ own buttons on top of the resource-system shell.
 
 In rough priority order, the markdown side is still missing:
 
-1. A way to mark a cell **Excluded** (`#| excluded: true` → drops the cell from the scraped resource but keeps it in the source `.nb`) and **Hidden when published** (`#| hidden: true` → closed `CellOpen -> False` on the web page, open in the download).
-2. Guide-page listing-layout option (`#| listing: oneline | inline | block` per `## Functions` block) so the author can choose the layout the "1 Line Function Listing" / "Inline Listing Toggle" buttons set.
-3. An `## Annotations` convention (or `<annotate>…</annotate>` inline tag) for the rare `TooltipBox` cases.
-4. A `TableSpan` option for the rare wide-first-column case (likely a YAML option on the table block - GFM can't express it in the table syntax itself).
+1. Guide-page listing-layout option (`#| listing: oneline | inline | block` per `## Functions` block) so the author can choose the layout the "1 Line Function Listing" / "Inline Listing Toggle" buttons set.
+2. An `## Annotations` convention (or `<annotate>…</annotate>` inline tag) for the rare `TooltipBox` cases.
+3. A `TableSpan` option for the rare wide-first-column case (likely a YAML option on the table block - GFM can't express it in the table syntax itself).
 
 Done since the last revision:
 
 - `Template: Overview` with the `TOC*` heading hierarchy (worked sample: `examples/AccessibleColors/docs/Tutorials/Overview.md`).
+- `#| excluded: true` (appends `"Excluded"`; the scraper drops the cell) and `#| hidden: true` (adds `"HiddenMaterial"` + `CellOpen -> False`; the cell is closed on the web page, open in the downloadable notebook).
 
 The remaining gaps (Reviewer comments / Submit-to-repository button /
 bulk paclet rewrites / TOOLS dropdown items) are either review-loop
