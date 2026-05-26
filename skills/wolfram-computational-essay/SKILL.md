@@ -105,7 +105,7 @@ expected result in an `<!-- => ... -->` comment after the cell. Keep each
 input to about three lines - the essay reads better when each code segment
 is short enough to fit in a single mental scope. Inline math is `$...$`.
 To link a documented symbol, wrap an inferred ref in `<code>`:
-`<code>[Symbol]()</code>`.
+`<code>[Range]()</code>`.
 
 ## Build & deploy
 

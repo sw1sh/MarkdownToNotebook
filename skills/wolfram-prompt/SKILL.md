@@ -116,7 +116,7 @@ convention), one `key: value` per line: `eval: false` (show code without running
 points), `flag: future|excised|...`. Record an example's expected result in an
 `<!-- => ... -->` comment after the cell. Inline math is `$...$`. To link a
 documented symbol inline, wrap an inferred ref in `<code>`:
-`<code>[Symbol]()</code>` - the empty parens make markdown viewers render it as a
+`<code>[Range]()</code>` - the empty parens make markdown viewers render it as a
 clickable link, and the `<code>` wrapper applies code styling. The converter
 routes the empty-URL link through `linkInferred` to a `paclet:` ref; the `-out.md`
 twin further rewrites it to the public web URL.
@@ -165,7 +165,7 @@ Each row is `<|"Level" -> ..., "Tag" -> ..., "Parameters" -> ...|>` with
 before submission: `DescriptionTooLong` (shorten to under 128 chars),
 `ExampleTextLastCharacter` (end an example caption with `:`),
 `FoundUnformattedCode` (wrap a stray WL symbol in `` `backticks` `` or in
-an inferred `[Symbol]()` link), `ThreeDotEllipsis` (use `…` not `...`),
+an inferred link with empty parens like `[Range]()` (substitute the actual symbol name for `Range`), `ThreeDotEllipsis` (use `…` not `...`),
 `NotASystemSymbol` (link foreign function-repo names instead of formatting
 them as system symbols), `LargeCellBounds/CellHeight` (rasterized output too
 big - crop it with `#| tear: h` or shrink the source). The repo's

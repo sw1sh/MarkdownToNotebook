@@ -52,7 +52,7 @@ it directly to documentation cell styles:
 
 Structure the note as a narrative: lead with the problem, show the simplest
 approach, then build up. Use concrete, runnable examples throughout. Inline math is
-`$...$`, inline code is `` `code` ``, and `<code>[Symbol]()</code>` infers a
+`$...$`, inline code is `` `code` ``, and `<code>[Range]()</code>` infers a
 documentation link to a symbol's reference page. The `<code>` wrapper applies code
 styling around the inferred-link (markdown viewers process markdown inside an
 inline HTML element but not inside backticked code spans), and the empty parens
@@ -95,7 +95,7 @@ Each row is `<|"Level" -> ..., "Tag" -> ..., "Parameters" -> ...|>` with
 before submission: `DescriptionTooLong` (shorten to under 128 chars),
 `ExampleTextLastCharacter` (end an example caption with `:`),
 `FoundUnformattedCode` (wrap a stray WL symbol in `` `backticks` `` or in
-an inferred `[Symbol]()` link), `ThreeDotEllipsis` (use `…` not `...`),
+an inferred link with empty parens like `[Range]()` (substitute the actual symbol name for `Range`), `ThreeDotEllipsis` (use `…` not `...`),
 `NotASystemSymbol` (link foreign function-repo names instead of formatting
 them as system symbols), `LargeCellBounds/CellHeight` (rasterized output too
 big - crop it with `#| tear: h` or shrink the source). The repo's

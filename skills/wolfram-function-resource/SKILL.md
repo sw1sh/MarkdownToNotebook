@@ -98,7 +98,7 @@ convention), one `key: value` per line:
 To show a produced notebook as a thumbnail, return a `NotebookObject`
 (`NotebookPut[MarkdownToNotebook[...]]`); the converter rasterizes it. Inline math
 is `$...$`. To link a documented symbol inline, wrap an inferred ref in `<code>`:
-`<code>[Symbol]()</code>` - the empty parens make markdown viewers (pandoc, GitHub)
+`<code>[Range]()</code>` - the empty parens make markdown viewers (pandoc, GitHub)
 render it as a clickable link, and the `<code>` wrapper applies code styling around
 that link (markdown forbids nested formatting inside backticked code spans, but
 processes markdown *inside* an inline HTML element). The converter routes the
@@ -147,7 +147,7 @@ Each row is `<|"Level" -> ..., "Tag" -> ..., "Parameters" -> ...|>` with
 before submission: `DescriptionTooLong` (shorten to under 128 chars),
 `ExampleTextLastCharacter` (end an example caption with `:`),
 `FoundUnformattedCode` (wrap a stray WL symbol in `` `backticks` `` or in
-an inferred `[Symbol]()` link), `ThreeDotEllipsis` (use `…` not `...`),
+an inferred link with empty parens like `[Range]()` (substitute the actual symbol name for `Range`), `ThreeDotEllipsis` (use `…` not `...`),
 `NotASystemSymbol` (link foreign function-repo names instead of formatting
 them as system symbols), `LargeCellBounds/CellHeight` (rasterized output too
 big - crop it with `#| tear: h` or shrink the source). The repo's

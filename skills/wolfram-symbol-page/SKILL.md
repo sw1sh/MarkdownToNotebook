@@ -47,25 +47,30 @@ resolves this). `URI` is the page's `ref/` path.
 - `## Usage` - one statement per paragraph. The canonical signature form wraps
   the whole signature in an inline `<code>` tag so markdown viewers process the
   nested markdown inside it (links, italics, math) while rendering the whole
-  span in code style:
+  span in code style. Substitute the actual symbol and argument names; the
+  examples below use a hypothetical `MyFunc[x_1, x_2]`:
 
-      <code>[SymbolName]()[$x_1$, $x_2$]</code> gives the foo, computed from $x_1$ and $x_2$.
+      <code>[MyFunc]()[$x_1$, $x_2$]</code> gives the result, computed from $x_1$ and $x_2$.
 
   GitHub and Pandoc render this as a code-styled clickable link (the symbol's
-  ref page), then literal brackets, then italic *x*₁, *x*₂. The converter
-  strips the `<code>` wrapper, peels the `[`Name`](…)` link down to the name,
-  drops `*…*` italics around args, and rewrites `$x_i$` to the template form
-  `x$i` before handing the reconstructed signature to DocumentationTools' usage
-  template-parser. Bare backtick / prose / hybrid forms still work as fallbacks.
+  ref page - here, the `MyFunc` ref page), then literal brackets, then italic
+  *x*₁, *x*₂. The converter strips the `<code>` wrapper, peels the
+  `[`Name`](…)` link down to the name, drops `*…*` italics around args, and
+  rewrites `$x_i$` to the template form `x$i` before handing the reconstructed
+  signature to DocumentationTools' usage template-parser. Bare backtick /
+  prose / hybrid forms still work as fallbacks.
 - `## Details & Options` - bullets become `Notes` cells; pipe tables become grids
-  (use one for an options table). Link other symbols inline with
-  `<code>[Symbol]()</code>`. Two things matter here: the empty parens (without
-  them markdown viewers do not render the `[…]` as a link element), and the
-  `<code>` wrapper (markdown forbids nested formatting inside backticked code
-  spans, but processes markdown *inside* an inline HTML element - so the
-  `[link]()` inside `<code>` renders as a clickable link with code styling). The
-  converter strips the wrapper, routes the empty-URL link to a `paclet:` ref in
-  the notebook, and the twin rewrites it to the public web URL.
+  (use one for an options table). Link another symbol inline by wrapping its
+  *actual* name in the inferred-link form, e.g. `<code>[Range]()</code>` to
+  link `Range`, `<code>[WCAGContrastRatio]()</code>` to link a paclet symbol -
+  the literal name goes between the brackets, never the word "Symbol". Two
+  things matter here: the empty parens (without them markdown viewers do not
+  render the `[…]` as a link element), and the `<code>` wrapper (markdown
+  forbids nested formatting inside backticked code spans, but processes
+  markdown *inside* an inline HTML element - so the `[link]()` inside `<code>`
+  renders as a clickable link with code styling). The converter strips the
+  wrapper, routes the empty-URL link to a `paclet:` ref in the notebook, and
+  the twin rewrites it to the public web URL.
 - `## Basic Examples` then the extended sections `## Scope`, `## Options`,
   `## Applications`, `## Properties and Relations`, `## Possible Issues`,
   `## Neat Examples`. Each example is one computation; separate siblings in a
@@ -118,7 +123,7 @@ Each row is `<|"Level" -> ..., "Tag" -> ..., "Parameters" -> ...|>` with
 before submission: `DescriptionTooLong` (shorten to under 128 chars),
 `ExampleTextLastCharacter` (end an example caption with `:`),
 `FoundUnformattedCode` (wrap a stray WL symbol in `` `backticks` `` or in
-an inferred `[Symbol]()` link), `ThreeDotEllipsis` (use `…` not `...`),
+an inferred link with empty parens like `[Range]()` (substitute the actual symbol name for `Range`), `ThreeDotEllipsis` (use `…` not `...`),
 `NotASystemSymbol` (link foreign function-repo names instead of formatting
 them as system symbols), `LargeCellBounds/CellHeight` (rasterized output too
 big - crop it with `#| tear: h` or shrink the source). The repo's

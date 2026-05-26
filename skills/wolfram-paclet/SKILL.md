@@ -59,7 +59,7 @@ categories** (do not invent names) - an empty group is a submission hint.
 ## Sections
 
 - `## Details & Options` - bullets become `Notes` cells; pipe tables become grids.
-- `## Usage` - the symbols the paclet provides, as `<code>[Symbol]()</code>`
+- `## Usage` - the symbols the paclet provides, as `<code>[Range]()</code>`
   inferred reference links (the `<code>` wrapper applies code styling, the empty
   parens make markdown viewers render it as a clickable link).
 - Example sections (`## Basic Examples`, `## Scope`, `## Applications`, ...) - one
@@ -74,7 +74,7 @@ categories** (do not invent names) - an empty group is a submission hint.
 
 `#|` lines at the top of a fenced `wl` cell: `eval`, `file`, `screenshot`, `tear`,
 `flag` (one `key: value` per line). Inline math is `$...$`; to link a documented
-symbol inline, wrap an inferred ref in `<code>`: `<code>[Symbol]()</code>`.
+symbol inline, wrap an inferred ref in `<code>`: `<code>[Range]()</code>`.
 
 ## Build and deploy
 
@@ -117,7 +117,7 @@ Each row is `<|"Level" -> ..., "Tag" -> ..., "Parameters" -> ...|>` with
 before submission: `DescriptionTooLong` (shorten to under 128 chars),
 `ExampleTextLastCharacter` (end an example caption with `:`),
 `FoundUnformattedCode` (wrap a stray WL symbol in `` `backticks` `` or in
-an inferred `[Symbol]()` link), `ThreeDotEllipsis` (use `…` not `...`),
+an inferred link with empty parens like `[Range]()` (substitute the actual symbol name for `Range`), `ThreeDotEllipsis` (use `…` not `...`),
 `NotASystemSymbol` (link foreign function-repo names instead of formatting
 them as system symbols), `LargeCellBounds/CellHeight` (rasterized output too
 big - crop it with `#| tear: h` or shrink the source). The repo's
