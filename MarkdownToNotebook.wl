@@ -1532,16 +1532,28 @@ inlineImage[alt_String, src_String] := Block[{img = Quiet @ Import[src]},
    FractionBox, ...). Fall back to a Wolfram-expression parse in TraditionalForm
    if the TeX parse fails.
 
-   normalizeTeX rewrites a small set of amsmath fraction commands that Wolfram's
-   TeX importer mis-parses. \tfrac and \dfrac (text-style and display-style
-   fractions) in isolation parse fine, but in the presence of surrounding tokens
-   the importer extends the fraction to absorb prior and trailing content
-   (e.g. T = \tfrac{1}{2}(T + T^T) parses as FractionBox[T = 1, 2(T+T^T)]).
-   \frac has no such bug; substituting is lossless because \tfrac vs \frac is a
-   sizing hint that TraditionalForm in the notebook context-sizes anyway. *)
+   normalizeTeX rewrites two LaTeX forms that Wolfram's TeX importer mis-parses:
+
+   1. \tfrac / \dfrac -> \frac. The size-only variants parse fine in isolation,
+      but in the presence of surrounding tokens the importer extends the
+      fraction to absorb prior and trailing content (e.g. T = \tfrac{1}{2}(T +
+      T^T) parses as FractionBox[T = 1, 2(T+T^T)]). \frac has no such bug; the
+      substitution is lossless because the size difference is a typesetting
+      hint that TraditionalForm in the notebook context-sizes anyway.
+
+   2. _\cmd{...} / ^\cmd{...} -> _{\cmd{...}} / ^{\cmd{...}}. The importer
+      requires subscript/superscript operands to be braced when the operand is
+      itself a LaTeX command; LaTeX itself accepts the unbraced single-token
+      form. Covers \text, \hat, \bar, \vec, \tilde, \mathrm, \mathbf, \mathit,
+      \mathcal, \mathfrak, \mathbb, \operatorname, and any other single-argument
+      command. The rule handles one level of braces in the argument; deeply
+      nested-brace arguments are rare inline and fall back to the inputBoxes
+      parse if they break. *)
 normalizeTeX[s_String] := StringReplace[s, {
     "\\tfrac" -> "\\frac",
-    "\\dfrac" -> "\\frac"
+    "\\dfrac" -> "\\frac",
+    sub : ("_" | "^") ~~ "\\" ~~ cmd : (LetterCharacter ..) ~~ "{" ~~ inner : Shortest[Except["}"] ..] ~~ "}" :>
+        sub <> "{\\" <> cmd <> "{" <> inner <> "}}"
 }]
 
 (* Wolfram's TeX importer drops the delimiters of every matrix environment
