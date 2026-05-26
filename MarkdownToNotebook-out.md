@@ -1234,6 +1234,15 @@ fillSlot[name_, opts_, data_] := Block[{meta = data["meta"]},
         "LLMConfigurationExtra", codeSlot[opts, data["sections"], "llm configuration"],
         "SampleChat", multiCodeSlot[opts, data["sections"], "chat examples"],
         "Topics", fillListCells[opts, asList @ Lookup[meta, "Topics", {}]],
+        (* === LLMTool slots ===
+           A Tool resource exposes a callable LLMTool with a name +
+           one-sentence ToolDescription (used by the model to decide whether to
+           call it), a parameter spec, and the actual function body. Three of
+           the slots take one code block each from the matching named section. *)
+        "ToolDescription", fillTextDataCells[opts, sectionText[data["sections"], "tool description"]],
+        "ToolParameters", codeSlot[opts, data["sections"], "tool parameters"],
+        "ToolFunction", codeSlot[opts, data["sections"], "tool function"],
+        "ToolAppearanceRules", codeSlot[opts, data["sections"], "tool appearance"],
         (* === Demonstration slots ===
            A Demonstration's content is split across named sections rather than the
            Function template's TemplateSlots: Caption / Initialization / Manipulate /
@@ -1995,6 +2004,76 @@ defaultNotebook[data_] := Block[{counter = 0, cells},
     Notebook[cells, StyleDefinitions -> "Default.nb"]
 ]
 
+(* === Computational Essay ===
+   Stephen Wolfram's notebook genre: title, byline (author + date), an
+   abstract paragraph, then narrative-driven body where every code cell sits
+   between a short prose intro and its own one-line caption (the "CodeText"
+   style cell). The published venue is the Notebook Archive / Wolfram
+   Cloud, not a Function Repository submission, so the produced notebook
+   is just a plain .nb with the Default stylesheet plus the essay's metadata
+   header. Frontmatter beyond Name / Description carries Author, Date, and
+   Abstract; the body falls through the same Heading / Prose / List / Code
+   handlers the Default template uses, with code-block captions promoted to
+   "CodeText" cells when they end in a colon. *)
+essayHeaderCells[meta_] := Block[{title, author, date, abstract, cells = {}},
+    title = Lookup[meta, "Name", Lookup[meta, "Title", ""]];
+    author = Lookup[meta, "Author", Lookup[meta, "ContributedBy", ""]];
+    date = Lookup[meta, "Date", ""];
+    abstract = Lookup[meta, "Abstract", Lookup[meta, "Description", ""]];
+    If[title =!= "", AppendTo[cells, Cell[title, "Title"]]];
+    If[author =!= "" || date =!= "",
+        AppendTo[cells, Cell[
+            TextData @ {
+                If[author =!= "", StyleBox["by " <> author, "Subtitle"], Nothing],
+                If[author =!= "" && date =!= "", StyleBox[" \[Bullet] ", "Subtitle"], Nothing],
+                If[date =!= "", StyleBox[date, "Subtitle"], Nothing]
+            },
+            "Subtitle"
+        ]]
+    ];
+    If[abstract =!= "",
+        AppendTo[cells, Cell[TextData @ inlineTextData[abstract], "Abstract"]]
+    ];
+    cells
+]
+
+essayNotebook[data_] := Block[{meta = data["meta"], counter = 0, header, body, prevWasCaption = False},
+    header = essayHeaderCells[meta];
+    body = Catenate @ MapIndexed[
+        Function[{block, ix},
+            Block[{type = block["Type"], text, captionStyle},
+                Switch[type,
+                    "Heading", prevWasCaption = False;
+                        {Cell[block["Text"], Lookup[$headingStyleMap, block["Level"], "Subsubsection"]]},
+                    "Prose", text = block["Text"];
+                        (* a one-line prose paragraph that ends in ":" right before a
+                           code cell is the essay's code-caption style ("CodeText");
+                           ordinary multi-line / non-colon paragraphs stay "Text". *)
+                        captionStyle = StringEndsQ[StringTrim[text], ":"] &&
+                            ! StringContainsQ[text, "\n"] &&
+                            ix[[1]] < Length[data["blocks"]] &&
+                            Lookup[data["blocks"][[ix[[1]] + 1]], "Type", ""] === "Code";
+                        prevWasCaption = captionStyle;
+                        {Cell[TextData @ inlineTextData[text], If[captionStyle, "CodeText", "Text"]]},
+                    "List", prevWasCaption = False; listItemCells[block, "Item"],
+                    "Table", prevWasCaption = False; {tableCell[block]},
+                    "Quote", prevWasCaption = False; {quoteCell[block["Text"]]},
+                    "MathBlock", prevWasCaption = False; {mathBlockCell[block["Text"]]},
+                    "Image", prevWasCaption = False; {imageCell[block]},
+                    "Code", prevWasCaption = False;
+                        If[ executableQ[block],
+                            counter += 1; exampleIOFor[block, counter],
+                            withCellFlag[block, {Cell[block["Code"], "Program"]}]
+                        ],
+                    _, {}
+                ]
+            ]
+        ],
+        data["blocks"]
+    ];
+    Notebook[Join[header, body], StyleDefinitions -> "Default.nb"]
+]
+
 (* === template registry === *)
 
 (* the Paclet template also wraps its directory / main-guide / context metadata
@@ -2067,6 +2146,9 @@ buildNotebook["Demonstration", data_] := resourceNotebook["Demonstration", data]
 buildNotebook["Symbol", data_] := symbolNotebook[data]
 buildNotebook["Guide", data_] := guideNotebook[data]
 buildNotebook["TechNote", data_] := tutorialNotebook[data]
+buildNotebook["ComputationalEssay", data_] := essayNotebook[data]
+buildNotebook["Essay", data_] := essayNotebook[data]
+buildNotebook["LLMTool", data_] := resourceNotebook["LLMTool", data]
 buildNotebook[_, data_] := defaultNotebook[data]
 
 (* Every cell needs a CellID for the resource scraper to locate the definition and
@@ -2619,6 +2701,16 @@ MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/r
 
 ![output](images/MarkdownToNotebook-out-27.png)
 
+### Computational Essay
+
+The `ComputationalEssay` template fills the Wolfram [Computational Essay](https://writings.stephenwolfram.com/2017/11/what-is-a-computational-essay/) genre - an intellectual story told through narrative prose interleaved with short, captioned Wolfram Language inputs. The produced notebook uses the `Default.nb` stylesheet (no resource scraper, no docked submit toolbar) and is deployable to the [Notebook Archive](https://www.notebookarchive.org/), [Wolfram Community](https://community.wolfram.com/), or a public `CloudObject`. The [How Random Is Pi?](https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/PiIsMostlyRandom.md) sample probes the digits of pi for the kind of patterns a *normal* number ought not have - a chi-square test, a 2D random walk on the digits - in five short segments; deployed [here](https://www.wolframcloud.com/obj/nikm/DeployedResources/ComputationalEssay/HowRandomIsPi):
+
+```wl
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/PiIsMostlyRandom.md"]
+```
+
+![output](images/MarkdownToNotebook-out-28.png)
+
 ## Properties and Relations
 
 The Wolfram Language already reads markdown into a plain notebook - <code>[Import](https://reference.wolfram.com/language/ref/Import.html)["doc.md", "Notebook"]</code>, or <code>[ImportString](https://reference.wolfram.com/language/ref/ImportString.html)[markdown, {"Markdown", "Notebook"}]</code> for a string. `MarkdownToNotebook` builds on that idea and adds the resource layer: the layout chosen from frontmatter, the metadata slots, cell options, and evaluated and cached example cells. The built-in import of the same snippet gives just the bare cells (it does parse inline TeX math, the same `$x$` convention used here):
@@ -2627,7 +2719,7 @@ The Wolfram Language already reads markdown into a plain notebook - <code>[Impor
 ImportString["# Title\n\nText with inline math $\\sin x$.", {"Markdown", "Notebook"}]
 ```
 
-![output](images/MarkdownToNotebook-out-28.png)
+![output](images/MarkdownToNotebook-out-29.png)
 
 `FunctionResource` then fills the same template [CreateNotebook](https://reference.wolfram.com/language/ref/CreateNotebook.html)["FunctionResource"] opens (publishable with [ResourceSubmit](https://reference.wolfram.com/language/ref/ResourceSubmit.html)), and `Symbol`/`Guide` fill the DocumentationTools templates `DocumentationBuild` turns into reference pages.
 
@@ -2639,7 +2731,7 @@ A string that is neither a URL nor an existing file is treated as raw markdown, 
 MarkdownToNotebook["nonexistent.md", "Association"]["Sections"]
 ```
 
-![output](images/MarkdownToNotebook-out-29.png)
+![output](images/MarkdownToNotebook-out-30.png)
 
 ## Neat Examples
 
@@ -2649,7 +2741,7 @@ The neatest example is this very document: running the function on its own GitHu
 NotebookPut[MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/MarkdownToNotebook.md", "Evaluate" -> False]]
 ```
 
-![output](images/MarkdownToNotebook-out-30.png)
+![output](images/MarkdownToNotebook-out-31.png)
 
 Because this very document is itself such a literate source - its `## Definition` inlines `MarkdownToNotebook.wl` and its frontmatter is the resource metadata - running the function on it reproduces this definition notebook, so the function publishes itself.
 
@@ -2667,7 +2759,7 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-31.png)
+![output](images/MarkdownToNotebook-out-32.png)
 
 A `<code>[Symbol](https://reference.wolfram.com/language/ref/Symbol.html)</code>` reference in a Usage signature carries a paclet link on the head (regression: the link silently disappeared when the `<code>` rule was rewritten to wrap the whole span in one `InlineFormula` instead of recursing on the inside):
 
@@ -2682,7 +2774,7 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-32.png)
+![output](images/MarkdownToNotebook-out-33.png)
 
 A bullet list with indented continuation lines folds each continuation into the preceding item, so a three-bullet list with two-line continuations is three items, not six (regression: the list parser used to break at the continuation, producing alternating one-item lists and stray paragraphs):
 
@@ -2698,7 +2790,7 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-33.png)
+![output](images/MarkdownToNotebook-out-34.png)
 
 The `"PreserveSource"` option defaults to `False`, so a notebook the converter writes does *not* carry the source in its `TaggingRules`:
 
@@ -2710,7 +2802,7 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-34.png)
+![output](images/MarkdownToNotebook-out-35.png)
 
 With `"PreserveSource" -> True`, the source is stashed under the `"MarkdownToNotebook"` tagging key and the inverse round-trips it byte-exactly:
 
@@ -2731,4 +2823,4 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-35.png)
+![output](images/MarkdownToNotebook-out-36.png)

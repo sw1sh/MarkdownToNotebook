@@ -38,8 +38,17 @@ deployResource[outNb_, template_String, name_String] := UsingFrontEnd @ Block[
     CurrentValue[nbObj, CreateCellID] = True;
     SelectionMove[nbObj, All, Notebook];
     FrontEndTokenExecute[nbObj, "Save"];
-    ro = ResourceObject[nbObj];
-    payload = If[template === "FunctionResource", ResourceFunction[ro], ro];
+    (* a Computational Essay has no resource-system metadata to scrape - the
+       deployable artifact is just the notebook itself, hosted at a public
+       CloudObject URL (the way Notebook Archive does for its essay
+       collection). For every other template, build a ResourceObject from
+       the notebook so the deploy carries the resource definition. *)
+    If[template === "ComputationalEssay" || template === "Essay",
+        payload = NotebookGet[nbObj]
+        ,
+        ro = ResourceObject[nbObj];
+        payload = If[template === "FunctionResource", ResourceFunction[ro], ro]
+    ];
     (* deploy BEFORE closing - ResourceObject lazily reads the example subnotebook
        from the still-open front-end notebook, so closing first triggers
        ResourceObject::depnbcl and drops every Examples cell from the deployed

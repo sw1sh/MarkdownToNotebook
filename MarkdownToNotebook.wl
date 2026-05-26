@@ -1160,6 +1160,15 @@ fillSlot[name_, opts_, data_] := Block[{meta = data["meta"]},
         "LLMConfigurationExtra", codeSlot[opts, data["sections"], "llm configuration"],
         "SampleChat", multiCodeSlot[opts, data["sections"], "chat examples"],
         "Topics", fillListCells[opts, asList @ Lookup[meta, "Topics", {}]],
+        (* === LLMTool slots ===
+           A Tool resource exposes a callable LLMTool with a name +
+           one-sentence ToolDescription (used by the model to decide whether to
+           call it), a parameter spec, and the actual function body. Three of
+           the slots take one code block each from the matching named section. *)
+        "ToolDescription", fillTextDataCells[opts, sectionText[data["sections"], "tool description"]],
+        "ToolParameters", codeSlot[opts, data["sections"], "tool parameters"],
+        "ToolFunction", codeSlot[opts, data["sections"], "tool function"],
+        "ToolAppearanceRules", codeSlot[opts, data["sections"], "tool appearance"],
         (* === Demonstration slots ===
            A Demonstration's content is split across named sections rather than the
            Function template's TemplateSlots: Caption / Initialization / Manipulate /
@@ -1921,6 +1930,76 @@ defaultNotebook[data_] := Block[{counter = 0, cells},
     Notebook[cells, StyleDefinitions -> "Default.nb"]
 ]
 
+(* === Computational Essay ===
+   Stephen Wolfram's notebook genre: title, byline (author + date), an
+   abstract paragraph, then narrative-driven body where every code cell sits
+   between a short prose intro and its own one-line caption (the "CodeText"
+   style cell). The published venue is the Notebook Archive / Wolfram
+   Cloud, not a Function Repository submission, so the produced notebook
+   is just a plain .nb with the Default stylesheet plus the essay's metadata
+   header. Frontmatter beyond Name / Description carries Author, Date, and
+   Abstract; the body falls through the same Heading / Prose / List / Code
+   handlers the Default template uses, with code-block captions promoted to
+   "CodeText" cells when they end in a colon. *)
+essayHeaderCells[meta_] := Block[{title, author, date, abstract, cells = {}},
+    title = Lookup[meta, "Name", Lookup[meta, "Title", ""]];
+    author = Lookup[meta, "Author", Lookup[meta, "ContributedBy", ""]];
+    date = Lookup[meta, "Date", ""];
+    abstract = Lookup[meta, "Abstract", Lookup[meta, "Description", ""]];
+    If[title =!= "", AppendTo[cells, Cell[title, "Title"]]];
+    If[author =!= "" || date =!= "",
+        AppendTo[cells, Cell[
+            TextData @ {
+                If[author =!= "", StyleBox["by " <> author, "Subtitle"], Nothing],
+                If[author =!= "" && date =!= "", StyleBox[" \[Bullet] ", "Subtitle"], Nothing],
+                If[date =!= "", StyleBox[date, "Subtitle"], Nothing]
+            },
+            "Subtitle"
+        ]]
+    ];
+    If[abstract =!= "",
+        AppendTo[cells, Cell[TextData @ inlineTextData[abstract], "Abstract"]]
+    ];
+    cells
+]
+
+essayNotebook[data_] := Block[{meta = data["meta"], counter = 0, header, body, prevWasCaption = False},
+    header = essayHeaderCells[meta];
+    body = Catenate @ MapIndexed[
+        Function[{block, ix},
+            Block[{type = block["Type"], text, captionStyle},
+                Switch[type,
+                    "Heading", prevWasCaption = False;
+                        {Cell[block["Text"], Lookup[$headingStyleMap, block["Level"], "Subsubsection"]]},
+                    "Prose", text = block["Text"];
+                        (* a one-line prose paragraph that ends in ":" right before a
+                           code cell is the essay's code-caption style ("CodeText");
+                           ordinary multi-line / non-colon paragraphs stay "Text". *)
+                        captionStyle = StringEndsQ[StringTrim[text], ":"] &&
+                            ! StringContainsQ[text, "\n"] &&
+                            ix[[1]] < Length[data["blocks"]] &&
+                            Lookup[data["blocks"][[ix[[1]] + 1]], "Type", ""] === "Code";
+                        prevWasCaption = captionStyle;
+                        {Cell[TextData @ inlineTextData[text], If[captionStyle, "CodeText", "Text"]]},
+                    "List", prevWasCaption = False; listItemCells[block, "Item"],
+                    "Table", prevWasCaption = False; {tableCell[block]},
+                    "Quote", prevWasCaption = False; {quoteCell[block["Text"]]},
+                    "MathBlock", prevWasCaption = False; {mathBlockCell[block["Text"]]},
+                    "Image", prevWasCaption = False; {imageCell[block]},
+                    "Code", prevWasCaption = False;
+                        If[ executableQ[block],
+                            counter += 1; exampleIOFor[block, counter],
+                            withCellFlag[block, {Cell[block["Code"], "Program"]}]
+                        ],
+                    _, {}
+                ]
+            ]
+        ],
+        data["blocks"]
+    ];
+    Notebook[Join[header, body], StyleDefinitions -> "Default.nb"]
+]
+
 (* === template registry === *)
 
 (* the Paclet template also wraps its directory / main-guide / context metadata
@@ -1993,6 +2072,9 @@ buildNotebook["Demonstration", data_] := resourceNotebook["Demonstration", data]
 buildNotebook["Symbol", data_] := symbolNotebook[data]
 buildNotebook["Guide", data_] := guideNotebook[data]
 buildNotebook["TechNote", data_] := tutorialNotebook[data]
+buildNotebook["ComputationalEssay", data_] := essayNotebook[data]
+buildNotebook["Essay", data_] := essayNotebook[data]
+buildNotebook["LLMTool", data_] := resourceNotebook["LLMTool", data]
 buildNotebook[_, data_] := defaultNotebook[data]
 
 (* Every cell needs a CellID for the resource scraper to locate the definition and

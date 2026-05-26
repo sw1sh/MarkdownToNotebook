@@ -347,6 +347,16 @@ The `Demonstration` template fills the [Demonstrations Project](https://demonstr
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/BlochSphereGates.md"]
 ```
 
+### Computational Essay
+
+The `ComputationalEssay` template fills the Wolfram [Computational Essay](https://writings.stephenwolfram.com/2017/11/what-is-a-computational-essay/) genre - an intellectual story told through narrative prose interleaved with short, captioned Wolfram Language inputs. The produced notebook uses the `Default.nb` stylesheet (no resource scraper, no docked submit toolbar) and is deployable to the [Notebook Archive](https://www.notebookarchive.org/), [Wolfram Community](https://community.wolfram.com/), or a public `CloudObject`. The [How Random Is Pi?](https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/PiIsMostlyRandom.md) sample probes the digits of pi for the kind of patterns a *normal* number ought not have - a chi-square test, a 2D random walk on the digits - in five short segments; deployed [here](https://www.wolframcloud.com/obj/nikm/DeployedResources/ComputationalEssay/HowRandomIsPi):
+
+```wl
+#| screenshot: true
+#| tear: 200
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/PiIsMostlyRandom.md"]
+```
+
 ## Properties and Relations
 
 The Wolfram Language already reads markdown into a plain notebook - <code>[Import]()["doc.md", "Notebook"]</code>, or <code>[ImportString]()[markdown, {"Markdown", "Notebook"}]</code> for a string. `MarkdownToNotebook` builds on that idea and adds the resource layer: the layout chosen from frontmatter, the metadata slots, cell options, and evaluated and cached example cells. The built-in import of the same snippet gives just the bare cells (it does parse inline TeX math, the same `$x$` convention used here):

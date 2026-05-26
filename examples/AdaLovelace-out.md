@@ -32,75 +32,33 @@ Stay in character. Frame each reply as if you were writing in a letter, a footno
 ## Chat Examples
 
 ```wl
-ChatEvaluate[ChatObject["", LLMEvaluator -> LLMConfiguration[<|"Prompts" -> LLMPrompt[ResourceObject[EvaluationNotebook[]]]|>]], "What is a function?"]
+ChatEvaluate[ChatObject["", LLMEvaluator -> LLMConfiguration[<|"Prompts" -> LLMPrompt["AdaLovelace"]|>]], "What is a function?"]
 ```
-
-> ResourceObject::noas: 
->    The argument ResourceSystemClient`DefinitionNotebook`ScrapeResource[
->      Missing[NotAvailable], NotebookObject[<<Messages>>]] should be the name
->      or id of an existing resource or an Association defining a new resource.
-
-> ResourceObject::noas: 
->    The argument $Failed should be the name or id of an existing resource or an
->      Association defining a new resource.
-
-> LLMConfiguration::llminvprompt: 
->    Expected a valid "Prompts" specification but found $Failed instead.
-
-> ChatObject::llmconfig: 
->    Expected either a valid configuration name, an association or a rule in
->      constructing LLMConfiguration, but found $Failed
->      in LLMEvaluator value instead.
-
-![output](images/AdaLovelace-out-1.png)
 
 ## Basic Examples
 
 A direct invocation through [LLMSynthesize](https://reference.wolfram.com/language/ref/LLMSynthesize.html) gives one self-contained reply in her voice:
 
 ```wl
-LLMSynthesize[{LLMPrompt[ResourceObject[EvaluationNotebook[]]], "Explain the Analytical Engine to a modern programmer."}]
+LLMSynthesize[{LLMPrompt["AdaLovelace"], "Explain the Analytical Engine to a modern programmer."}]
 ```
-
-> ResourceObject::noas: 
->    The argument ResourceSystemClient`DefinitionNotebook`ScrapeResource[
->      Missing[NotAvailable], NotebookObject[<<Messages>>]] should be the name
->      or id of an existing resource or an Association defining a new resource.
-
-> General::stop: Further output of ResourceObject::noas
->      will be suppressed during this calculation.
-
-> LLMSynthesize::llmbdprompt: 
->    The value of the input {$Failed, 
->      Explain the Analytical Engine to a modern programmer.} is not a string, a
->      string template, an image, or a list of those.
-
-![output](images/AdaLovelace-out-2.png)
 
 ## Scope
 
 She answers any topic in character, mapping modern computing terms back to her era. Here she translates a list operation:
 
 ```wl
-LLMSynthesize[{LLMPrompt[ResourceObject[EvaluationNotebook[]]], "What is a map of a function over a list?"}]
+LLMSynthesize[{LLMPrompt["AdaLovelace"], "What is a map of a function over a list?"}]
 ```
-
-> LLMSynthesize::llmbdprompt: 
->    The value of the input {$Failed, What is a map of a function over a list?}
->      is not a string, a string template, an image, or a list of those.
-
-![output](images/AdaLovelace-out-3.png)
 
 ## Applications
 
 Wrap the persona as a one-call function so a worksheet of questions reads as a letter exchange:
 
 ```wl
-askAda = LLMResourceFunction[ResourceObject[EvaluationNotebook[]]];
+askAda = LLMResourceFunction["AdaLovelace"];
 askAda /@ {"What is recursion?", "What are imaginary numbers good for?"}
 ```
-
-![output](images/AdaLovelace-out-4.png)
 
 ## Properties and Relations
 
@@ -109,42 +67,20 @@ The persona is a thin layer over [LLMConfiguration](https://reference.wolfram.co
 ```wl
 ChatEvaluate[ChatObject["",
     LLMEvaluator -> LLMConfiguration[<|
-        "Prompts" -> LLMPrompt[ResourceObject[EvaluationNotebook[]]],
+        "Prompts" -> LLMPrompt["AdaLovelace"],
         "Tools" -> {LLMTool["WolframAlpha"]}
     |>]],
     "Compute the first ten Bernoulli numbers for me."
 ]
 ```
 
-> LLMTool::argrx: LLMTool called with 1 arguments; 3 arguments are expected.
-
-> LLMConfiguration::llminvprompt: 
->    Expected a valid "Prompts" specification but found $Failed instead.
-
-> ChatObject::llmconfig: 
->    Expected either a valid configuration name, an association or a rule in
->      constructing LLMConfiguration, but found $Failed
->      in LLMEvaluator value instead.
-
-![output](images/AdaLovelace-out-5.png)
-
 ## Possible Issues
 
 A request that has no historical analogue (REST APIs, JavaScript frameworks) draws a polite admission of ignorance rather than a hallucinated answer, since the persona is anchored to 1843:
 
 ```wl
-LLMSynthesize[{LLMPrompt[ResourceObject[EvaluationNotebook[]]], "Explain how a JavaScript event loop works."}]
+LLMSynthesize[{LLMPrompt["AdaLovelace"], "Explain how a JavaScript event loop works."}]
 ```
-
-> LLMSynthesize::llmbdprompt: 
->    The value of the input {$Failed, 
->      Explain how a JavaScript event loop works.} is not a string, a string
->      template, an image, or a list of those.
-
-> General::stop: Further output of LLMSynthesize::llmbdprompt
->      will be suppressed during this calculation.
-
-![output](images/AdaLovelace-out-6.png)
 
 ## Neat Examples
 
@@ -152,10 +88,8 @@ Use her as a *narrator* over a Wolfram Language computation - the cell evaluates
 
 ```wl
 With[{value = First @ N[BernoulliB[2 Range[5]]]},
-    LLMSynthesize[{LLMPrompt[ResourceObject[EvaluationNotebook[]]],
+    LLMSynthesize[{LLMPrompt["AdaLovelace"],
         "I have just computed B_2 and obtained the value " <> ToString[value] <>
         ". Please remark on what this number signifies."}]
 ]
 ```
-
-![output](images/AdaLovelace-out-7.png)
