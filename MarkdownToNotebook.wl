@@ -2495,7 +2495,31 @@ exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheL
      MarkdownToNotebook[source, file]          -> write the notebook to file, return it
    ("Notebook"/"Association" are reserved; a ".md" target writes markdown; any other
    string is a notebook file path.) The layout comes from the Template frontmatter. *)
-Options[MarkdownToNotebook] = {"Evaluate" -> True}
+(* "PreserveSource" -> True stamps the produced notebook with the original
+   markdown source under TaggingRules -> {..., "MarkdownToNotebook" -> <|
+   "Source" -> ..., "Template" -> ...|>}. The default is False so that a
+   notebook is a strictly-rendered artifact - any post-conversion edit to
+   the cells shows up faithfully when the inverse (NotebookToMarkdown) walks
+   it back to markdown, which is the right semantics for diffing the edited
+   .nb against the .md it was built from. With True, the .nb becomes
+   self-contained (rendered view + the markdown source it came from in one
+   file), useful for tooling that wants the source side-loaded without
+   re-parsing the cells. NotebookToMarkdown does NOT read this stash - by
+   design, the walker runs on every input. *)
+withMarkdownSource[Notebook[cells_, o : OptionsPattern[]], src_String, tmpl_String] := Block[
+    {oldRules = Lookup[{o}, TaggingRules, {}], newEntry},
+    newEntry = "MarkdownToNotebook" -> <|"Source" -> src, "Template" -> tmpl|>;
+    Notebook[cells,
+        TaggingRules -> If[ListQ[oldRules],
+            Append[DeleteCases[oldRules, "MarkdownToNotebook" -> _], newEntry],
+            {newEntry}
+        ],
+        Sequence @@ FilterRules[{o}, Except[TaggingRules]]
+    ]
+]
+withMarkdownSource[other_, _, _] := other
+
+Options[MarkdownToNotebook] = {"Evaluate" -> True, "PreserveSource" -> False}
 
 (* spec is an *optional* second argument (default Automatic). Do not split this
    into a separate 1-argument form that forwards to the 3-argument one: an empty
@@ -2515,6 +2539,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
        Block initializer mis-binds (it reads "func" as the option name and errors
        OptionValue::optnf, leaving evalExamples False so nothing is ever evaluated). *)
     evalExamples = TrueQ[Lookup[Flatten[{opts}], "Evaluate", True]],
+    preserveSource = TrueQ[Lookup[Flatten[{opts}], "PreserveSource", False]],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cached, allHit, outputs, data, filled
 },
@@ -2559,6 +2584,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     defCode = StringRiffle[#["Code"] & /@ sectionCells[sections, "definition"], "\n\n"];
     data = <|"meta" -> meta, "blocks" -> blocks, "sections" -> sections, "defCode" -> defCode|>;
     filled = withCreateCellID @ applyDocFlag[buildNotebook[tmplName, data], Lookup[meta, "Flag", ""]];
+    If[preserveSource, filled = withMarkdownSource[filled, text, tmplName]];
 
     Which[
         spec === Automatic || spec === "Notebook", filled,

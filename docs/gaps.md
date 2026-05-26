@@ -112,6 +112,7 @@ Done since the last revision:
 
 - `Template: Overview` with the `TOC*` heading hierarchy (worked sample: `examples/AccessibleColors/docs/Tutorials/Overview.md`).
 - `#| excluded: true` (appends `"Excluded"`; the scraper drops the cell) and `#| hidden: true` (adds `"HiddenMaterial"` + `CellOpen -> False`; the cell is closed on the web page, open in the downloadable notebook).
+- `"PreserveSource" -> True` (opt-in, default `False`): stamps the original markdown source into the produced notebook's `TaggingRules`. `NotebookToMarkdown` does NOT read this stash (the walker runs on every input by design, so an edited `.nb` round-trips with the edits visible) - the stash is for external tooling that wants the source side-loaded.
 
 The remaining gaps (Reviewer comments / Submit-to-repository button /
 bulk paclet rewrites / TOOLS dropdown items) are either review-loop

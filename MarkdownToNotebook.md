@@ -37,11 +37,12 @@ the implementation inline:
 - `FunctionResource` fills the official `FunctionResourceDefinition.nb` template (keeping its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates; `Default` maps headings and code to standard notebook styles.
 - The *frontmatter* is a YAML-style `key: value` header fenced by `---` lines at the very top of the document - the [front matter](https://jekyllrb.com/docs/front-matter/) convention static-site generators use - carrying the resource metadata. Its keys mirror the chosen template's slots (`Name`, `Description`, `Keywords`, `Categories`, `ContributedBy`, `SeeAlso`, `Links`, and so on), so the author fills metadata, never cell styles.
 - The optional second argument selects the result: omitted (or `"Notebook"`) returns the [Notebook](), `"Association"` returns the parsed structure, a `.nb` file name writes the notebook, and a `.md` file name writes a *markdown twin* - the same document with every evaluated output rasterized to an image beside it.
-- The function takes one option:
+- The function takes two options:
 
 | Option | Default | |
 |---|---|---|
 | `"Evaluate"` | `True` | evaluate the example cells and keep their output; `False` leaves them as input only, which a self-referential document passes to convert its own source without re-running its own examples |
+| `"PreserveSource"` | `False` | with `True`, stamps the original markdown source into the produced notebook's `TaggingRules` (under the `"MarkdownToNotebook"` key, as `<\|"Source" -> ..., "Template" -> ...\|>`) so the `.nb` is self-contained: rendered view + the source it came from in one file, useful for tooling that wants the source side-loaded. The default is `False` so the notebook is a strictly-rendered artifact and any post-conversion edit to the cells shows up faithfully when [NotebookToMarkdown]() walks it back to markdown - the right semantics for diffing the edited `.nb` against the `.md` it was built from. [NotebookToMarkdown]() does NOT read this stash by design |
 
 - A `Flag` frontmatter key flags the whole document and a code cell's `#| flag:` option flags that cell, with one of the documentation build's flags - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` - the front end's Futurize / Excise toolbar buttons, written as the build's banner cell.
 - Evaluated example outputs are cached as a [PersistentSymbol]() per cell at the `"Local"` [PersistenceLocation](), keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
@@ -457,6 +458,35 @@ VerificationTest[
     ],
     True,
     TestID -> "#\\| excluded: true appends \"Excluded\" after the base \"Input\" style"
+]
+```
+
+The `"PreserveSource"` option defaults to `False` so a notebook the converter writes does *not* carry the source in its `TaggingRules` - any later edit to the cells is the new truth, visible in the walker's diff:
+
+```wl
+VerificationTest[
+    FreeQ[MarkdownToNotebook["# Hi"], "MarkdownToNotebook" -> _],
+    True,
+    TestID -> "\"PreserveSource\" defaults to False - no stash in TaggingRules"
+]
+```
+
+With `"PreserveSource" -> True`, the source is stamped under the `"MarkdownToNotebook"` tagging key byte-exact:
+
+```wl
+VerificationTest[
+    With[{src = "## Demo\n\nA paragraph.\n"},
+        First[
+            Cases[
+                MarkdownToNotebook[src, "PreserveSource" -> True],
+                ("MarkdownToNotebook" -> v_) :> v,
+                Infinity
+            ],
+            <||>
+        ]["Source"] === src
+    ],
+    True,
+    TestID -> "\"PreserveSource\" -> True stamps the source under \"MarkdownToNotebook\""
 ]
 ```
 

@@ -2515,7 +2515,31 @@ exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheL
      MarkdownToNotebook[source, file]          -> write the notebook to file, return it
    ("Notebook"/"Association" are reserved; a ".md" target writes markdown; any other
    string is a notebook file path.) The layout comes from the Template frontmatter. *)
-Options[MarkdownToNotebook] = {"Evaluate" -> True}
+(* "PreserveSource" -> True stamps the produced notebook with the original
+   markdown source under TaggingRules -> {..., "MarkdownToNotebook" -> <|
+   "Source" -> ..., "Template" -> ...|>}. The default is False so that a
+   notebook is a strictly-rendered artifact - any post-conversion edit to
+   the cells shows up faithfully when the inverse (NotebookToMarkdown) walks
+   it back to markdown, which is the right semantics for diffing the edited
+   .nb against the .md it was built from. With True, the .nb becomes
+   self-contained (rendered view + the markdown source it came from in one
+   file), useful for tooling that wants the source side-loaded without
+   re-parsing the cells. NotebookToMarkdown does NOT read this stash - by
+   design, the walker runs on every input. *)
+withMarkdownSource[Notebook[cells_, o : OptionsPattern[]], src_String, tmpl_String] := Block[
+    {oldRules = Lookup[{o}, TaggingRules, {}], newEntry},
+    newEntry = "MarkdownToNotebook" -> <|"Source" -> src, "Template" -> tmpl|>;
+    Notebook[cells,
+        TaggingRules -> If[ListQ[oldRules],
+            Append[DeleteCases[oldRules, "MarkdownToNotebook" -> _], newEntry],
+            {newEntry}
+        ],
+        Sequence @@ FilterRules[{o}, Except[TaggingRules]]
+    ]
+]
+withMarkdownSource[other_, _, _] := other
+
+Options[MarkdownToNotebook] = {"Evaluate" -> True, "PreserveSource" -> False}
 
 (* spec is an *optional* second argument (default Automatic). Do not split this
    into a separate 1-argument form that forwards to the 3-argument one: an empty
@@ -2535,6 +2559,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
        Block initializer mis-binds (it reads "func" as the option name and errors
        OptionValue::optnf, leaving evalExamples False so nothing is ever evaluated). *)
     evalExamples = TrueQ[Lookup[Flatten[{opts}], "Evaluate", True]],
+    preserveSource = TrueQ[Lookup[Flatten[{opts}], "PreserveSource", False]],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cached, allHit, outputs, data, filled
 },
@@ -2579,6 +2604,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     defCode = StringRiffle[#["Code"] & /@ sectionCells[sections, "definition"], "\n\n"];
     data = <|"meta" -> meta, "blocks" -> blocks, "sections" -> sections, "defCode" -> defCode|>;
     filled = withCreateCellID @ applyDocFlag[buildNotebook[tmplName, data], Lookup[meta, "Flag", ""]];
+    If[preserveSource, filled = withMarkdownSource[filled, text, tmplName]];
 
     Which[
         spec === Automatic || spec === "Notebook", filled,
@@ -2597,11 +2623,12 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
 - `FunctionResource` fills the official `FunctionResourceDefinition.nb` template (keeping its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates; `Default` maps headings and code to standard notebook styles.
 - The *frontmatter* is a YAML-style `key: value` header fenced by `---` lines at the very top of the document - the [front matter](https://jekyllrb.com/docs/front-matter/) convention static-site generators use - carrying the resource metadata. Its keys mirror the chosen template's slots (`Name`, `Description`, `Keywords`, `Categories`, `ContributedBy`, `SeeAlso`, `Links`, and so on), so the author fills metadata, never cell styles.
 - The optional second argument selects the result: omitted (or `"Notebook"`) returns the [Notebook](https://reference.wolfram.com/language/ref/Notebook.html), `"Association"` returns the parsed structure, a `.nb` file name writes the notebook, and a `.md` file name writes a *markdown twin* - the same document with every evaluated output rasterized to an image beside it.
-- The function takes one option:
+- The function takes two options:
 
 | Option | Default |  |
 |---|---|---|
 | `"Evaluate"` | `True` | evaluate the example cells and keep their output; `False` leaves them as input only, which a self-referential document passes to convert its own source without re-running its own examples |
+| `"PreserveSource"` | `False` | with `True`, stamps the original markdown source into the produced notebook's `TaggingRules` (under the `"MarkdownToNotebook"` key, as `<\ | "Source" -> ..., "Template" -> ...\ | >`) so the `.nb` is self-contained: rendered view + the source it came from in one file, useful for tooling that wants the source side-loaded. The default is `False` so the notebook is a strictly-rendered artifact and any post-conversion edit to the cells shows up faithfully when [NotebookToMarkdown]() walks it back to markdown - the right semantics for diffing the edited `.nb` against the `.md` it was built from. [NotebookToMarkdown]() does NOT read this stash by design |
 
 - A `Flag` frontmatter key flags the whole document and a code cell's `#| flag:` option flags that cell, with one of the documentation build's flags - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` - the front end's Futurize / Excise toolbar buttons, written as the build's banner cell.
 - Evaluated example outputs are cached as a [PersistentSymbol](https://reference.wolfram.com/language/ref/PersistentSymbol.html) per cell at the `"Local"` [PersistenceLocation](https://reference.wolfram.com/language/ref/PersistenceLocation.html), keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
@@ -3060,6 +3087,39 @@ VerificationTest[
 
 ![output](images/MarkdownToNotebook-out-36.png)
 
+The `"PreserveSource"` option defaults to `False` so a notebook the converter writes does *not* carry the source in its `TaggingRules` - any later edit to the cells is the new truth, visible in the walker's diff:
+
+```wl
+VerificationTest[
+    FreeQ[MarkdownToNotebook["# Hi"], "MarkdownToNotebook" -> _],
+    True,
+    TestID -> "\"PreserveSource\" defaults to False - no stash in TaggingRules"
+]
+```
+
+![output](images/MarkdownToNotebook-out-37.png)
+
+With `"PreserveSource" -> True`, the source is stamped under the `"MarkdownToNotebook"` tagging key byte-exact:
+
+```wl
+VerificationTest[
+    With[{src = "## Demo\n\nA paragraph.\n"},
+        First[
+            Cases[
+                MarkdownToNotebook[src, "PreserveSource" -> True],
+                ("MarkdownToNotebook" -> v_) :> v,
+                Infinity
+            ],
+            <||>
+        ]["Source"] === src
+    ],
+    True,
+    TestID -> "\"PreserveSource\" -> True stamps the source under \"MarkdownToNotebook\""
+]
+```
+
+![output](images/MarkdownToNotebook-out-38.png)
+
 The `#| hidden: true` cell option adds the `"HiddenMaterial"` modifier style and `CellOpen -> False` so the cell renders closed on the published web page (and open in the downloadable example notebook):
 
 ```wl
@@ -3078,7 +3138,7 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-37.png)
+![output](images/MarkdownToNotebook-out-39.png)
 
 The `Overview` template maps the markdown heading hierarchy to TOC* cells (`#` → `TOCDocumentTitle`, `##` → `TOCChapter`, `###` → `TOCSection`, ...) and turns bulleted list items under a heading into TOC leaves one level deeper:
 
@@ -3094,4 +3154,4 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-38.png)
+![output](images/MarkdownToNotebook-out-40.png)
