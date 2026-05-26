@@ -203,7 +203,68 @@ prose is built with `inlineTextData`, not the raw string. The `Default`
 style-map builder emitting `Cell[text, "Text"]` instead of
 `Cell[TextData @ inlineTextData[text], "Text"]` is why a `` [Range]() `` link (or
 any inline formatting) shows as literal text when converting a plain string with
-no frontmatter (which selects `Default`).
+no frontmatter (which selects `Default`). The same applies to heading cells
+(`Cell[block["Text"], "Section"]` ignored `$g_{\mu\nu}$` etc. until the heading
+builders were routed through `inlineTextData`) and to the captured operand of
+each emphasis rule (`emBoldBox`, `emItalicBox`, ...) - those builders re-call
+`inlineTextData` on their inner string so `$math$`, `` `code` ``, and inferred
+links inside `*italic*` / `**bold**` render correctly.
+
+## TeX importer mis-parses (math)
+
+Wolfram's TeX importer (`ImportString["$...$", "TeX"]`) has several bugs that
+matter for documentation authoring; `normalizeTeX` and the GridBox-restore pass
+in `mathInline` work around them so the markdown source can use ordinary LaTeX.
+
+### `\tfrac` / `\dfrac` absorb surrounding tokens
+`\tfrac` and `\dfrac` (text-style and display-style fractions) parse cleanly in
+isolation, but in the presence of preceding or trailing tokens the importer
+extends the fraction to absorb them. So
+`T \;=\; \tfrac{1}{2}(T + T^T) \;+\; \tfrac{1}{2}(T - T^T)`
+parses as a single giant nested
+`FractionBox[FractionBox[T = 1, 2(T+T^T) + 1], 2(T - T^T)]`
+instead of `T = (1/2)(T+T^T) + (1/2)(T-T^T)`. Plain `\frac` has no such bug; the
+substitution `\tfrac` / `\dfrac` -> `\frac` in `normalizeTeX` is lossless
+because the size difference between text-style and display-style fractions is a
+typesetting hint that TraditionalForm context-sizes on its own.
+
+### `_\cmd{...}` / `^\cmd{...}` requires a braced operand
+The importer fails on subscript / superscript operands that are themselves a
+LaTeX command. `S_\text{tot}`, `\vec S_\text{tot}^2`, `x^\mathrm{eff}` all
+return `$Failed` from `ImportString`, even though LaTeX accepts the unbraced
+single-token form. The brace-wrapped variant `S_{\text{tot}}` parses correctly.
+`normalizeTeX` rewrites `_\cmd{arg}` to `_{\cmd{arg}}` (and `^` likewise)
+before the import. Covers `\text`, `\hat`, `\bar`, `\vec`, `\tilde`, `\mathrm`,
+`\mathbf`, `\mathit`, `\mathcal`, `\mathfrak`, `\mathbb`, `\operatorname`, and
+any other single-argument command.
+
+### Matrix environments lose every delimiter
+Every LaTeX matrix environment imports as a bare `GridBox` with no surrounding
+brackets - `\begin{pmatrix}...\end{pmatrix}` (parens by definition),
+`\begin{bmatrix}...\end{bmatrix}` (brackets), `\begin{vmatrix}...\end{vmatrix}`
+(single bars), `\begin{Vmatrix}...\end{Vmatrix}` (double bars),
+`\bigl(\begin{smallmatrix}...\end{smallmatrix}\bigr)`, and even bare
+`(\begin{matrix}...\end{matrix})` all collapse to the same un-delimited grid.
+No TeX-level workaround helps: `\left(\matrix\right)` and `\bigl(\matrix\bigr)`
+are eaten too. `matrixDelims` scans the source for the wanted delimiter pair
+(from the environment name and / or the wrapping size command) and
+`wrapGridBoxes` re-attaches them after import.
+
+### Stretching delimiters need the full MatrixForm box signature
+Wrapping the grid as `RowBox[{"(", gb, ")"}]` puts parens back but they render
+as small text-baseline characters; the typesetter does not stretch them to the
+matrix's full height. Stretching requires the exact shape `MatrixForm[mat] //
+ToBoxes` emits:
+
+- `TagBox[..., Function[BoxForm`e$, MatrixForm[BoxForm`e$]]]` outer wrapper;
+- `RowBox[{open, "\[NoBreak]", grid, "\[NoBreak]", close}]` with the
+  `\[NoBreak]` glue between the delimiters and the grid;
+- `GridBox[..., GridBoxAlignment -> {"Columns" -> {{Center}}, "Rows" -> {{Baseline}}}, GridBoxSpacings -> {...}]`
+  with the alignment / spacings options MatrixForm sets;
+- **bare** grid entries (atoms or `RowBox`es), not `Cell[TextData[...]]`. The
+  TeX importer wraps each entry in a nested cell; the matrix-stretch heuristic
+  only fires when grid cells are bare boxes, so `unwrapGridCell` strips the
+  TextData padding before the grid is handed back to the typesetter.
 
 ## Documentation pages
 
