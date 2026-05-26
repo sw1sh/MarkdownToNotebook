@@ -404,3 +404,45 @@ VerificationTest[
 ]
 ```
 
+The inverse walker [NotebookToMarkdown]() emits "$\theta$"-style inline math for any `InlineFormula` cell wrapping a `FormBox` - not a backticked code span (regression: the previous handler wrapped every `InlineFormula` content in backticks, so the recovered math came out as "`$θ$`" with extra delimiters):
+
+```wl
+VerificationTest[
+    StringContainsQ[
+        NotebookToMarkdown @ Notebook[{
+            Cell[TextData[{"angle ", Cell[BoxData[FormBox["\[Theta]", TraditionalForm]], "InlineFormula"]}], "Text"]
+        }],
+        "$\[Theta]$"
+    ],
+    True,
+    TestID -> "walker: InlineFormula+FormBox -> $math$ (no backticks)"
+]
+```
+
+The walker preserves a code cell's original surface layout by walking the box tree directly - so a multi-statement Input cell with literal "\n" separators round-trips with its line breaks intact (regression: an earlier `MakeExpression`-based deparse choked on multi-statement boxes and fell back to literal "RawBoxes[RowBox[…]]" output):
+
+```wl
+VerificationTest[
+    StringContainsQ[
+        NotebookToMarkdown @ Notebook[{
+            Cell[BoxData[RowBox[{RowBox[{"a", " ", "=", " ", "1"}], ";", "\n", RowBox[{"b", " ", "=", " ", "2"}], ";"}]], "Input"]
+        }],
+        "a = 1;\nb = 2;"
+    ],
+    True,
+    TestID -> "walker: multi-statement Input cell preserves the \"\\n\" between statements"
+]
+```
+
+The walker silently drops decoration cells the resource template injects - the help-bubble opener that sits inside a heading's `TextData` is a `Cell[BoxData[PaneSelectorBox[…]]]`, never authored content, so the recovered heading is just the title (regression: the opener leaked through as raw box source jammed onto the heading line):
+
+```wl
+VerificationTest[
+    StringTrim @ NotebookToMarkdown @ Notebook[{
+        Cell[TextData[{"Caption", Cell[BoxData[PaneSelectorBox[{True -> "x"}, Dynamic[True]]], "Section"]}], "Section"]
+    }],
+    "## Caption",
+    TestID -> "walker: drops MoreInfoOpener-shaped decoration cells from heading TextData"
+]
+```
+
