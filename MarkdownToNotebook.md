@@ -459,3 +459,16 @@ VerificationTest[
 ]
 ```
 
+The unescape preserves Wolfram named-character escapes (`\[CircleTimes]`, `\[Theta]`, ...) - they share the leading `\[` with the markdown `\[` punctuation escape, so the Wolfram-name pattern is matched first and rebuilt verbatim (regression: the punctuation rule ate the leading `\`, leaving a stray `[CircleTimes]` that the inferred-link parser then auto-linked into a ButtonBox):
+
+```wl
+VerificationTest[
+    ! FreeQ[
+        MarkdownToNotebook["A <code>a \\[CircleTimes] b</code> reference."],
+        "\[CircleTimes]"
+    ],
+    True,
+    TestID -> "`<code>\\[Name]</code>` preserves the Wolfram named-character escape"
+]
+```
+

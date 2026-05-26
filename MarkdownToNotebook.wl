@@ -1372,8 +1372,18 @@ codeInlineCell[inner_String] := Block[{sig, head, url, boxes, unescaped},
        <code> would land in the .nb as literal "\*" instead of "*", which a
        markdown viewer renders as just "*" but the notebook would show the
        backslash. Backticked spans skip this because backticks freeze content
-       by design - "\*" in `` `code` `` is meant to be literal. *)
-    unescaped = StringReplace[inner, "\\" ~~ c : PunctuationCharacter :> c];
+       by design - "\*" in `` `code` `` is meant to be literal.
+
+       Wolfram named-character escapes ("\[Theta]", "\[CircleTimes]", ...)
+       share the leading "\[" with the markdown "\[" escape for a literal "[",
+       so list the Wolfram-name rule FIRST: at a "\[CircleTimes]" position
+       it matches and rebuilds the escape verbatim, blocking the punctuation
+       rule from eating the "\" and turning the kernel char into a stray
+       "[CircleTimes]" that the inferred-link parser would then auto-link. *)
+    unescaped = StringReplace[inner, {
+        "\\[" ~~ name : (LetterCharacter ..) ~~ "]" :> "\\[" <> name <> "]",
+        "\\" ~~ c : PunctuationCharacter :> c
+    }];
     sig = mathArgsToTemplate @ unwrapMarkdownSig @ unescaped;
     head = First[StringCases[sig,
         StartOfString ~~ h : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) :> h, 1], ""];
