@@ -17,12 +17,6 @@
 
 Needs["GeneralUtilities`"]
 
-(* Pull in the shared TaggingRules stash protocol from the sibling
-   MarkdownTools.wl. Quiet'd so a deployed resource notebook (which inlines
-   MarkdownTools.wl as a separate "## Definition" cell that runs first) does
-   not fire Get::noopen when there is no file on disk to load. *)
-Quiet @ Get[FileNameJoin[{Directory[], "MarkdownTools.wl"}]]
-
 mdSep = "\n(*--cell--*)\n"
 
 (* === frontmatter === *)
@@ -2256,7 +2250,7 @@ exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheL
      MarkdownToNotebook[source, file]          -> write the notebook to file, return it
    ("Notebook"/"Association" are reserved; a ".md" target writes markdown; any other
    string is a notebook file path.) The layout comes from the Template frontmatter. *)
-Options[MarkdownToNotebook] = {"Evaluate" -> True, "PreserveSource" -> False}
+Options[MarkdownToNotebook] = {"Evaluate" -> True}
 
 (* spec is an *optional* second argument (default Automatic). Do not split this
    into a separate 1-argument form that forwards to the 3-argument one: an empty
@@ -2276,7 +2270,6 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
        Block initializer mis-binds (it reads "func" as the option name and errors
        OptionValue::optnf, leaving evalExamples False so nothing is ever evaluated). *)
     evalExamples = TrueQ[Lookup[Flatten[{opts}], "Evaluate", True]],
-    preserveSource = TrueQ[Lookup[Flatten[{opts}], "PreserveSource", False]],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cached, allHit, outputs, data, filled
 },
@@ -2321,13 +2314,6 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     defCode = StringRiffle[#["Code"] & /@ sectionCells[sections, "definition"], "\n\n"];
     data = <|"meta" -> meta, "blocks" -> blocks, "sections" -> sections, "defCode" -> defCode|>;
     filled = withCreateCellID @ applyDocFlag[buildNotebook[tmplName, data], Lookup[meta, "Flag", ""]];
-    (* "PreserveSource" -> True (default): stash the source markdown in
-       TaggingRules so NotebookToMarkdown can recover the original verbatim -
-       the notebook becomes self-contained (the rendered view + the source it
-       came from in one file), and the inverse uses the stash for perfect
-       round-trip on every MTN-built notebook. Pass "PreserveSource" -> False
-       to suppress the stash for a stricter, source-less artifact. *)
-    If[preserveSource, filled = withMarkdownSource[filled, text, tmplName]];
 
     Which[
         spec === Automatic || spec === "Notebook", filled,

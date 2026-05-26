@@ -2,7 +2,7 @@
 Template: FunctionResource
 ResourceType: Function
 Name: NotebookToMarkdown
-Description: Recover the original markdown source from a Wolfram notebook
+Description: Recover a markdown approximation of a Wolfram notebook
 ContributedBy: Nikolay Murzin, Claude (Anthropic)
 Keywords: [markdown, literate programming, inverse, function repository, notebook, round trip]
 Categories: [Notebook Documents & Presentation]
@@ -11,20 +11,13 @@ Links: ["[MarkdownToNotebook - the forward converter](https://resources.wolframc
 EntrySymbol: NotebookToMarkdown
 ---
 
-`NotebookToMarkdown` is the inverse of [MarkdownToNotebook](https://resources.wolframcloud.com/FunctionRepository/resources/MarkdownToNotebook/). Given a notebook expression, a [NotebookObject](), or a `.nb` file path, it returns the markdown source that produced it. Every notebook MarkdownToNotebook itself writes carries the original source in its `TaggingRules`, so the round trip is exact - the same `Hash[markdown]` before and after. Notebooks without that stash get a best-effort cell walker that recognises the standard cell styles MarkdownToNotebook emits.
+`NotebookToMarkdown` is the inverse of [MarkdownToNotebook](https://resources.wolframcloud.com/FunctionRepository/resources/MarkdownToNotebook/). Given a notebook expression, a [NotebookObject](), or a `.nb` file path, it walks the cells and emits a markdown approximation - recognising the standard cell styles MarkdownToNotebook itself emits (Title / Section / ... / Text / Notes / Item / Input / Code / etc.) plus their inline `TextData` formatting.
 
 ## Definition
 
-The implementation lives across two plain `.wl` files - the shared
-[MarkdownTools.wl](https://github.com/sw1sh/MarkdownToNotebook/blob/main/MarkdownTools.wl)
-module that defines the stash protocol (its sibling forward converter loads
-the same file), and the cell walker itself. Each cell below inlines one file
-at conversion time via the `#| file:` option; the deployed resource therefore
-carries both files inline.
-
-```wl
-#| file: MarkdownTools.wl
-```
+The implementation is a single plain `.wl` file, inlined here at conversion
+time via the `#| file:` option; the deployed resource therefore carries it
+inline:
 
 ```wl
 #| file: NotebookToMarkdown.wl
@@ -39,22 +32,24 @@ carries both files inline.
 ## Details & Options
 
 - The *nb* argument can be a [Notebook]() expression, a [NotebookObject]() open in the front end, or a string `".nb"` file path. The file form `Get`s the notebook off disk; the NotebookObject form `NotebookGet`s the live one.
-- A notebook produced by [MarkdownToNotebook]() carries the original markdown source in `TaggingRules -> {... "MarkdownToNotebook" -> <|"Source" -> ..., "Template" -> ...|>}`. `NotebookToMarkdown` reads that entry first, so the round trip `nb -> md -> nb` is *exact* (same `Hash`).
-- For an arbitrary notebook (no stash), the function falls back to a cell walker that handles the standard styles MarkdownToNotebook itself emits: `Title` / `Section` / `Subsection` / `Subsubsection` map to `#` / `##` / `###` / `####` headings; `Text` / `Notes` / `Caption` / `Quote` to prose; `Item` / `ItemNumbered` to markdown lists; `Code` / `Input` to ```` ```wl ... ``` ```` fenced blocks; `Output` / `Message` are skipped (they regenerate on re-conversion).
+- `NotebookToMarkdown` always walks the cells - it does not consult any `TaggingRules` stash a forward run might have left behind. Walker quality is therefore the function's responsibility and is exercised on every input.
+- Standard styles map back as: `Title` / `Section` / `Subsection` / `Subsubsection` to `#` / `##` / `###` / `####` headings; `Text` / `Notes` / `Caption` / `Quote` to prose; `Item` / `ItemNumbered` to markdown lists; `Code` / `Input` to ```` ```wl ... ``` ```` fenced blocks; `Output` / `Message` are skipped (they regenerate on re-conversion).
 - Inline `TextData` is converted back through the same backtick / bold / italic / link rules the forward parser accepts, so the produced markdown re-parses to an equivalent block sequence.
-- The fallback walker does *not* recover frontmatter (there is no place in a generic notebook for it) or resource-template-specific slots; for that, write through the forward converter so the stash is present.
+- The walker does not recover frontmatter or resource-template-specific slots from the rendered cells; the markdown it emits is the rendered body only.
 
 ## Basic Examples
 
-A notebook built from a literate-markdown document with `"PreserveSource" -> True` is round-tripped byte-exactly:
+Walk a small notebook and recover the markdown body:
 
 ```wl
-With[{md = "# Demo\n\nA paragraph.\n\n```wl\nRange[5]^2\n```"},
-    md === NotebookToMarkdown @ MarkdownToNotebook[md, "PreserveSource" -> True]
-]
+NotebookToMarkdown @ Notebook[{
+    Cell["Demo", "Title"],
+    Cell["A paragraph.", "Text"],
+    Cell[BoxData["Range[5]^2"], "Input"]
+}]
 ```
 
-<!-- => True -->
+<!-- => "# Demo\n\nA paragraph.\n\n```wl\nRange[5]^2\n```\n" -->
 
 ## Scope
 
@@ -66,47 +61,34 @@ NotebookToMarkdown[FileNameJoin[{$TemporaryDirectory, "no-such-file.nb"}]] === N
 
 <!-- => True (Null because the path does not exist; with a real file it returns the markdown) -->
 
-## Applications
+## Properties and Relations
 
-Round-trip a literate document and assert the recovered source matches:
+The forward and inverse together form an editable pipeline: convert a markdown source, edit the notebook in the front end, walk the modified notebook back to markdown. The walker reflects the *current* state of the cells, so hand edits survive the round trip. Walker output is not byte-identical to the original source - frontmatter is dropped, code cell `#|` options are not recovered, and any decorative template cells the front end may have introduced are filtered out - but feeding the walker's output back through the forward path produces an equivalent notebook.
+
+## Possible Issues
+
+Round-trip is *approximate*. The walker reads the rendered cells, not the original source, so:
+
+- Frontmatter is not recovered (it lives in `TaggingRules`, not in cells).
+- Code cell options (`#| eval: false`, `#| screenshot: true`, ...) are gone.
+- Inline math and decorative formatting may serialize back to a simpler form.
+
+For an arbitrary notebook the walker emits its best guess at the prose / heading / code structure; for a notebook MarkdownToNotebook itself wrote, the body is close to the source but the frontmatter must be added back by hand if needed.
+
+## Neat Examples
+
+A round-trip smoke test: forward, walk, forward again, and check the second forward run produces a notebook with the same set of cell styles in the same order as the first - confirming the walker emits a faithful structural reduction even when byte-exact recovery is not possible:
 
 ```wl
-Module[{md = "# Demo\n\nText.\n", nb, recovered},
-    nb = MarkdownToNotebook[md, "PreserveSource" -> True];
-    recovered = NotebookToMarkdown[nb];
-    recovered === md
+With[{md = "# Demo\n\n## Section\n\nA paragraph.\n\n```wl\nRange[5]^2\n```\n"},
+    Module[{nb1, md2, nb2, styles},
+        nb1 = MarkdownToNotebook[md, "Evaluate" -> False];
+        md2 = NotebookToMarkdown[nb1];
+        nb2 = MarkdownToNotebook[md2, "Evaluate" -> False];
+        styles[nb_] := Cases[nb, Cell[_, s_String, ___] :> s, Infinity];
+        styles[nb1] === styles[nb2]
+    ]
 ]
 ```
 
 <!-- => True -->
-
-## Properties and Relations
-
-The stash that makes the round trip exact is a `TaggingRules` entry the forward converter writes when `"PreserveSource" -> True` - both sides use the same key (`"MarkdownToNotebook"`) and protocol from the shared `MarkdownTools.wl` module:
-
-```wl
-First[
-    Cases[
-        MarkdownToNotebook["# Demo", "PreserveSource" -> True],
-        ("MarkdownToNotebook" -> v_) :> v,
-        Infinity
-    ],
-    <||>
-]
-```
-
-<!-- => <|"Source" -> "# Demo", "Template" -> "Default"|> -->
-
-## Possible Issues
-
-A notebook never produced by [MarkdownToNotebook]() (or one written with `"PreserveSource" -> False`, the default) has no stash, so the inverse falls back to its cell walker - that walker is best-effort and may not reproduce every formatting detail. Round-trip for arbitrary notebooks is *not* guaranteed; round-trip for notebooks the converter wrote with the stash *is*:
-
-```wl
-NotebookToMarkdown @ Notebook[{Cell["Hello", "Text"]}]
-```
-
-<!-- => "Hello\n" (best-effort - no frontmatter, plain prose only) -->
-
-## Neat Examples
-
-The forward and the inverse together form an editable pipeline: convert a markdown source, edit the notebook in the front end, and recover the modified source through the inverse. The stash carries the *original* markdown, so a hand edit of the rendered notebook does not survive the round trip - the inverse always re-emits the source that built the notebook. This is the right semantics for documentation tooling: the markdown is canonical.

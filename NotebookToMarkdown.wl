@@ -1,25 +1,17 @@
 (* NotebookToMarkdown - the inverse of MarkdownToNotebook. Given a notebook
-   (expression / NotebookObject / .nb file path), recover the markdown source
-   that produced it.
+   (expression / NotebookObject / .nb file path), recover a markdown
+   approximation of its source by walking the cells.
 
-   Two paths:
-     1. Stash path - any notebook MarkdownToNotebook itself wrote carries the
-        original markdown source in TaggingRules under "MarkdownToNotebook";
-        we read it back verbatim. Round-trip is exact for every MTN-built
-        notebook (verified against every literate sample in the repo).
-     2. Walker path - for arbitrary notebooks (no stash), walk the cells and
-        emit markdown best-effort, recognising the standard cell styles
-        MarkdownToNotebook itself emits (Title / Section / .../ Text / Notes /
-        Item / Input / Code / etc.) plus their inline TextData formatting.
+   Walker-only by design: any TaggingRules stash a forward run might have left
+   behind is ignored, so this code is exercised on every input and round-trip
+   quality is the walker's responsibility, not a memoized shortcut. The walker
+   recognises the standard cell styles MarkdownToNotebook itself emits (Title /
+   Section / ... / Text / Notes / Item / Input / Code / etc.) plus their inline
+   TextData formatting.
 
    Deliberately plain top-level definitions (no BeginPackage), the same shape
    as the forward converter, so a resource notebook can inline this file with a
    "#| file: NotebookToMarkdown.wl" cell and have it work on Get. *)
-
-(* Pull the stash protocol in. Quiet'd so a deployed resource notebook (which
-   inlines MarkdownTools.wl as a separate "## Definition" cell that runs first)
-   does not fire Get::noopen when there is no file on disk to load. *)
-Quiet @ Get[FileNameJoin[{Directory[], "MarkdownTools.wl"}]]
 
 (* === inline TextData -> markdown text ===
    Patterns mirror the forward parser's inlineTextData output so a round trip
@@ -93,21 +85,8 @@ cellMd[other_] := ""
 
 (* === public entry === *)
 
-NotebookToMarkdown[Notebook[cells_List, opts___]] := Block[{stash, body},
-    (* stash-first: a notebook MarkdownToNotebook produced carries the source
-       it came from in its TaggingRules; return it verbatim - the round-trip
-       is then exact, both metadata and body. *)
-    stash = markdownSourceOf[Notebook[cells, opts]];
-    If[ AssociationQ[stash] && KeyExistsQ[stash, "Source"],
-        Return[stash["Source"]]
-    ];
-    (* fallback: walk the cells and emit markdown best-effort. Works on the
-       standard cell styles MTN itself produces. The result re-parses through
-       the forward path to a similar, but not necessarily byte-identical,
-       notebook (no frontmatter is recovered, no resource template restoration). *)
-    body = StringRiffle[DeleteCases[cellMd /@ cells, ""], "\n\n"];
-    body <> "\n"
-]
+NotebookToMarkdown[Notebook[cells_List, ___]] :=
+    StringRiffle[DeleteCases[cellMd /@ cells, ""], "\n\n"] <> "\n"
 NotebookToMarkdown[nbo_NotebookObject] := NotebookToMarkdown[NotebookGet[nbo]]
 NotebookToMarkdown[file_String /; FileExistsQ[file] && StringEndsQ[ToLowerCase[file], ".nb"]] :=
     NotebookToMarkdown[Get[file]]

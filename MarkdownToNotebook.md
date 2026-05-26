@@ -20,17 +20,11 @@ definition notebook, so it publishes itself.
 
 ## Definition
 
-The implementation lives across three plain `.wl` files - a tiny shared module
-that defines the stash protocol used by both this function and its inverse
-([NotebookToMarkdown](https://github.com/sw1sh/MarkdownToNotebook/blob/main/NotebookToMarkdown.md)),
-and the main forward converter. Each cell below inlines one file at conversion
-time via the `file` option, a general mechanism: any code cell with `#| file: path`
-is replaced by the contents of that local file or URL, resolved relative to
-this document. The deployed resource therefore carries both files inline.
-
-```wl
-#| file: MarkdownTools.wl
-```
+The implementation is a single plain `.wl` file, inlined here at conversion
+time via the `file` option - a general mechanism: any code cell with
+`#| file: path` is replaced by the contents of that local file or URL,
+resolved relative to this document. The deployed resource therefore carries
+the implementation inline:
 
 ```wl
 #| file: MarkdownToNotebook.wl
@@ -43,12 +37,11 @@ this document. The deployed resource therefore carries both files inline.
 - `FunctionResource` fills the official `FunctionResourceDefinition.nb` template (keeping its docked Deploy/Submit toolbar); `Symbol` and `Guide` fill the DocumentationTools authoring templates; `Default` maps headings and code to standard notebook styles.
 - The *frontmatter* is a YAML-style `key: value` header fenced by `---` lines at the very top of the document - the [front matter](https://jekyllrb.com/docs/front-matter/) convention static-site generators use - carrying the resource metadata. Its keys mirror the chosen template's slots (`Name`, `Description`, `Keywords`, `Categories`, `ContributedBy`, `SeeAlso`, `Links`, and so on), so the author fills metadata, never cell styles.
 - The optional second argument selects the result: omitted (or `"Notebook"`) returns the [Notebook](), `"Association"` returns the parsed structure, a `.nb` file name writes the notebook, and a `.md` file name writes a *markdown twin* - the same document with every evaluated output rasterized to an image beside it.
-- The function takes two options:
+- The function takes one option:
 
 | Option | Default | |
 |---|---|---|
 | `"Evaluate"` | `True` | evaluate the example cells and keep their output; `False` leaves them as input only, which a self-referential document passes to convert its own source without re-running its own examples |
-| `"PreserveSource"` | `False` | with `True`, stash the original markdown source in `TaggingRules` so [NotebookToMarkdown]() recovers it verbatim (the notebook becomes self-contained: rendered view + source it came from); default is `False` so the notebook is a strictly-rendered artifact and the inverse falls back to its cell walker |
 
 - A `Flag` frontmatter key flags the whole document and a code cell's `#| flag:` option flags that cell, with one of the documentation build's flags - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` - the front end's Futurize / Excise toolbar buttons, written as the build's banner cell.
 - Evaluated example outputs are cached as a [PersistentSymbol]() per cell at the `"Local"` [PersistenceLocation](), keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
@@ -258,22 +251,6 @@ MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
 MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", "Evaluate" -> False]
 ```
 
-### PreserveSource
-
-By default the produced notebook is a strictly-rendered artifact - the `TaggingRules` it carries hold only the resource template's own metadata. The inverse, [NotebookToMarkdown](), falls back to its cell walker to reconstruct markdown from the rendered cells:
-
-```wl
-FreeQ[MarkdownToNotebook["## Demo\n\nA paragraph."], "MarkdownToNotebook" -> _]
-```
-
----
-
-Pass `"PreserveSource" -> True` to stash the original markdown source under `TaggingRules -> {…, "MarkdownToNotebook" -> <|"Source" -> …, "Template" -> …|>}`. The notebook then becomes self-contained (rendered view + the source it came from in one file), and the inverse recovers the source verbatim for an exact round trip:
-
-```wl
-First[Cases[MarkdownToNotebook["## Demo\n\nA paragraph.", "PreserveSource" -> True], ("MarkdownToNotebook" -> v_) :> v, Infinity], <||>]
-```
-
 ## Applications
 
 `MarkdownToNotebook` fills every Wolfram Repository definition notebook from plain markdown, so authors never edit notebook cell styles by hand. The samples below live under [`examples/`](https://github.com/sw1sh/MarkdownToNotebook/tree/main/examples) in the repository; `examples/build.wls` builds each one and `DeployResource`-style `CloudDeploy[ResourceObject[nb], …, Permissions -> "Public"]`s it under a stable public URL, so every link below resolves to the live deployed notebook.
@@ -427,31 +404,3 @@ VerificationTest[
 ]
 ```
 
-The `"PreserveSource"` option defaults to `False`, so a notebook the converter writes does *not* carry the source in its `TaggingRules`:
-
-```wl
-VerificationTest[
-    FreeQ[MarkdownToNotebook["# Hi"], "MarkdownToNotebook" -> _],
-    True,
-    TestID -> "\"PreserveSource\" defaults to False - no stash in TaggingRules"
-]
-```
-
-With `"PreserveSource" -> True`, the source is stashed under the `"MarkdownToNotebook"` tagging key and the inverse round-trips it byte-exactly:
-
-```wl
-VerificationTest[
-    With[{src = "## Demo\n\nA paragraph.\n"},
-        First[
-            Cases[
-                MarkdownToNotebook[src, "PreserveSource" -> True],
-                ("MarkdownToNotebook" -> v_) :> v,
-                Infinity
-            ],
-            <||>
-        ]["Source"] === src
-    ],
-    True,
-    TestID -> "\"PreserveSource\" -> True stashes the source under \"MarkdownToNotebook\""
-]
-```
