@@ -93,7 +93,7 @@ sources = Join[
     {FileNameJoin[{dir, "MarkdownToNotebook.md"}],
      FileNameJoin[{dir, "NotebookToMarkdown.md"}]},
     Select[FileNames["*.md", FileNameJoin[{dir, "examples"}]], ! StringEndsQ[#, "-out.md"] &],
-    FileNames["*.md", FileNameJoin[{dir, "examples", "AccessibleColors", "docs"}], Infinity]
+    FileNames["*.md", FileNameJoin[{dir, "examples", "*", "docs"}], Infinity]
 ]
 
 Scan[
