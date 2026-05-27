@@ -4,3 +4,6 @@
 [submodule "examples/PAdic"]
 	path = examples/PAdic
 	url = https://github.com/sw1sh/PAdic.git
+[submodule "examples/WolframParser"]
+	path = examples/WolframParser
+	url = https://github.com/sw1sh/WolframParser.git
