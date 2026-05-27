@@ -269,7 +269,21 @@ tableRowLineQ[line_String] := StringContainsQ[line, "|"] && StringTrim[line] =!=
 tableSepQ[line_String] := StringContainsQ[line, "-"] && StringContainsQ[line, "|"] &&
     StringMatchQ[StringTrim[line], ("|" | ":" | "-" | " ") ..]
 
-splitTableRow[line_String] := StringTrim /@ StringSplit[StringTrim[StringTrim[line], "|"], "|"]
+(* GitHub-flavored Markdown lets a cell contain a literal `|` by
+   escaping it as `\|` - the backslash protects the pipe from being
+   read as a cell delimiter. We split on UNescaped `|`s by temporarily
+   swapping `\|` for a U+0001 sentinel character (never appears in
+   normal Markdown), splitting on `|`, then swapping the sentinel back
+   to a literal `|` in each cell. *)
+splitTableRow[line_String] := Block[{sentinel = FromCharacterCode[1]},
+    Map[
+        StringReplace[#, sentinel -> "|"] &,
+        StringTrim /@ StringSplit[
+            StringReplace[StringTrim[StringTrim[line], "|"], "\\|" -> sentinel],
+            "|"
+        ]
+    ]
+]
 
 tableSplit[{}, collected_] := {Reverse[collected], {}}
 tableSplit[lines_List, collected_] := If[ tableRowLineQ[First[lines]],
