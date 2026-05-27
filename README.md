@@ -40,10 +40,32 @@ ResourceFunction["https://www.wolframcloud.com/obj/nikm/DeployedResources/Functi
 - [`docs/`](docs/) - the markdown <-> notebook mapping, the palette/button catalog,
   formatting and resource-notebook references, hard-won [subtleties](docs/subtleties.md),
   and [`update-screenshots.wls`](docs/update-screenshots.wls).
-- [`examples/AccessibleColors`](examples/AccessibleColors) - a complete worked
-  example paclet (submodule), authored entirely in markdown and published as
+- [`examples/`](examples/) - worked example documents (see below).
+
+## Applications
+
+End-to-end markdown-authored Wolfram artifacts built with `MarkdownToNotebook`:
+
+- [`examples/AccessibleColors`](examples/AccessibleColors) - a complete
+  paclet (submodule), authored entirely in markdown and published as
   [Wolfram/AccessibleColors](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/AccessibleColors/):
   a guide, four symbol pages, a tutorial, and the Paclet Repository definition.
+- [`examples/IntroToQuantumComputing`](examples/IntroToQuantumComputing) - a
+  two-chapter book using the new `Template: Chapter` (Wolfram Book Tools
+  styles): exercises with solutions, vocabulary tables, Q&A, solved
+  examples, theorem/proof blocks, tech notes, summary, and references.
+  Generates a `Contents.nb` (using the WolframBookTools paclet's own
+  inline TOC stylesheet and cell shape) plus a `Master.nb` that
+  concatenates the chapters into one book-form notebook (mirroring
+  `WBTCreateCorrespondingPrintDirectory`). Published to the cloud at:
+  - [Master](https://www.wolframcloud.com/obj/nikm/IntroToQuantumComputing/Master.nb)
+  - [Contents](https://www.wolframcloud.com/obj/nikm/IntroToQuantumComputing/Contents.nb)
+  - [Chapter 1: What Is Quantum Computation?](https://www.wolframcloud.com/obj/nikm/IntroToQuantumComputing/01-what-is-quantum-computation.nb)
+  - [Chapter 2: Building Blocks of Quantum Circuits](https://www.wolframcloud.com/obj/nikm/IntroToQuantumComputing/02-building-blocks-of-quantum-circuits.nb)
+- Other markdown -> notebook samples under [`examples/`](examples/)
+  (AdaLovelace, BlochSphereGates, PiIsMostlyRandom, PrimeSpiralPoints,
+  QuantumWalk, ReverseAddSequence, WallpaperGroups) - each a single notebook
+  rendered with the `Default` / `Essay` templates.
 
 ## Quick start
 

@@ -1889,34 +1889,58 @@ usageCell[rawUsage_String] := Block[{
     ]
 ]
 
-(* a GitHub-flavored table -> a GridBox with gridlines (the palette's Insert
-   Custom Table). Header row is bold; short rows are padded to the column count;
-   each cell's text gets the usual inline formatting. *)
+(* a GitHub-flavored pipe table -> the same GridBox the palette inserts via
+   "Insert Custom Table" / "2 Column" / "3 Column": outer style
+   NColumnTableMod, with each row prefixed by a fixed Cell["      ", "ModInfo"]
+   placeholder (the narrow modification-indicator column, always whitespace -
+   NOT a slot for col-1 content) and the N content cells styled TableText.
+   The cell style supplies dividers / alignment / spacing, so no inline
+   GridBox options are needed. *)
+tableModStyleFor[2] := "2ColumnTableMod"
+tableModStyleFor[3] := "3ColumnTableMod"
+tableModStyleFor[_] := None
+
+modInfoPlaceholder = Cell["      ", "ModInfo"];
+
+tableModRow[cells_List, ncol_Integer, opts___] := Prepend[
+    Cell[TextData @ inlineTextData[#], "TableText", opts] & /@ PadRight[cells, ncol, ""],
+    modInfoPlaceholder
+]
+
+(* Fallback for column counts the palette has no *TableMod style for (1 or
+   >= 4). "TableNotes" is the table style the Function Repository / Paclet /
+   Example definition-notebook docked cells insert, and exists in those
+   stylesheets. The documentation stylesheets (Symbol / Guide / TechNote)
+   and Default.nb do not define it, so a "TableNotes" cell renders unstyled
+   / cramped there - switch to "Text" for those, which exists everywhere. *)
 tableCellBox[text_String, opts___] := Cell[TextData @ inlineTextData[text], "TableText", opts]
 
 tableGridRow[cells_List, ncol_Integer, opts___] :=
     tableCellBox[#, opts] & /@ PadRight[cells, ncol, ""]
 
-(* "TableNotes" is the table style the Function Repository / Paclet / Example
-   definition-notebook docked cells insert, and exists in those stylesheets. The
-   documentation stylesheets (Symbol / Guide / TechNote) and Default.nb do not
-   define it, so a "TableNotes" cell renders unstyled / cramped there - switch to
-   "Text" for those, which exists everywhere. *)
 $tableCellStyleFor := If[MemberQ[{"FunctionResource", "Paclet", "Example", "Data", "Prompt", "Demonstration"}, $docTemplate], "TableNotes", "Text"]
 
-(* a pipe table renders as a styled GridBox with horizontal row dividers, a bold
-   header row, and a bit of padding. The grid options are repeated inline so the
-   table reads correctly whichever cell style is used. *)
-tableCell[block_] := Block[{ncol = Length[block["Header"]], rows},
-    rows = Join[
-        {tableGridRow[block["Header"], ncol, FontWeight -> Bold]},
-        tableGridRow[#, ncol] & /@ block["Rows"]
-    ];
-    Cell[BoxData[GridBox[rows,
-        GridBoxAlignment -> {"Columns" -> {{Left}}, "Rows" -> {{Baseline}}},
-        GridBoxDividers -> {"Columns" -> {{None}}, "Rows" -> {{True}}},
-        GridBoxSpacings -> {"Columns" -> {{1.5}}, "Rows" -> {{0.7}}}
-    ]], $tableCellStyleFor]
+(* a pipe table renders as a *TableMod cell when the column count matches a
+   palette-supported width (2 or 3); the header row is bolded for readability.
+   Other widths fall through to a generic GridBox with inline dividers. *)
+tableCell[block_] := Block[{ncol = Length[block["Header"]], modStyle = tableModStyleFor[Length[block["Header"]]], rows},
+    If[modStyle =!= None,
+        rows = Join[
+            {tableModRow[block["Header"], ncol, FontWeight -> Bold]},
+            tableModRow[#, ncol] & /@ block["Rows"]
+        ];
+        Cell[BoxData[GridBox[rows]], modStyle]
+        ,
+        rows = Join[
+            {tableGridRow[block["Header"], ncol, FontWeight -> Bold]},
+            tableGridRow[#, ncol] & /@ block["Rows"]
+        ];
+        Cell[BoxData[GridBox[rows,
+            GridBoxAlignment -> {"Columns" -> {{Left}}, "Rows" -> {{Baseline}}},
+            GridBoxDividers -> {"Columns" -> {{None}}, "Rows" -> {{True}}},
+            GridBoxSpacings -> {"Columns" -> {{1.5}}, "Rows" -> {{0.7}}}
+        ]], $tableCellStyleFor]
+    ]
 ]
 
 (* an inlined markdown image (![alt](path "title")) -> an image cell. The title is

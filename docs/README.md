@@ -38,6 +38,7 @@ mapping.
 | `Paclet` | Paclet Repository definition | `DefinitionTemplate["Paclet"]` |
 | `Example` | Example Repository definition | `DefinitionTemplate["Example"]` |
 | `Data` | Data Repository definition | `DefinitionTemplate["Data"]` |
+| `Chapter` | one chapter of a Wolfram Book Tools book (Section + book-style back matter, ready for the palette's Make Contents / Preview PDF) | `BookToolsStyles.nb` |
 
 - **Doc pages** (`Symbol`/`Guide`/`TechNote`) are *authoring* notebooks; the
   docked **Build** button (`DocumentationBuild`) turns them into the final
@@ -58,6 +59,9 @@ mapping.
   links, and the palette's formatting buttons.
 - [palette.md](palette.md) - every Documentation Tools palette and docked-cell
   button, with its markdown equivalent and status.
+- [book-palette.md](book-palette.md) - the analogous deep-dive for the
+  Wolfram Book Tools palette (`WolframBookTools` paclet), with the proposed
+  `Template: Chapter` markdown -> notebook mapping. Status: design only.
 - [resource-guidelines.md](resource-guidelines.md) - a refined working copy of the
   official Function/Paclet Repository style guidelines, with how each maps to
   markdown. Re-fetch the linked sources when in doubt.
