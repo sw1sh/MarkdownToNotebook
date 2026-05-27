@@ -747,8 +747,19 @@ fillCheckbox[property_String, checked_List, type_String : "Function"] := {
    ToBoxes[Defer[...]] instead *renders* display heads (Framed, Style, Grid, Row,
    RGBColor, ...) into frames/swatches, corrupting the Input cell. Fall back to
    the Defer parse, then the raw string, if the front end is unavailable. *)
-inputBoxes[code_String] := Block[{boxes, parsed},
-    boxes = Quiet @ UsingFrontEnd @ MathLink`CallFrontEnd[FrontEnd`ReparseBoxStructurePacket[StringTrim[code]]];
+inputBoxes[code_String] := Block[{boxes, parsed, trimmed = StringTrim[code]},
+    (* LaTeX-style "\command" sequences (\left, \right, \sqrt, \to, \notin, ...)
+       collide with Wolfram's string-escape syntax: the front end's reparser
+       interprets "\r" / "\n" / "\t" / "\b" / "\f" as their control-character
+       escapes, so "\right" gets tokenised as "\r" + "ight". For inputs containing
+       backslash + two-or-more-letter commands - never valid bare WL, but the
+       normal shape of inline LaTeX - skip the reparse and emit the raw string
+       so it renders verbatim. "\[Name]" Wolfram named characters are unaffected
+       because they have "[" (not a letter) after the backslash. *)
+    If[StringContainsQ[trimmed, "\\" ~~ LetterCharacter ~~ LetterCharacter],
+        Return[trimmed]
+    ];
+    boxes = Quiet @ UsingFrontEnd @ MathLink`CallFrontEnd[FrontEnd`ReparseBoxStructurePacket[trimmed]];
     If[ FreeQ[boxes, $Failed] && (StringQ[boxes] || ! AtomQ[boxes]),
         boxes,
         parsed = Quiet @ ToExpression[code, StandardForm, Defer];
@@ -1507,6 +1518,18 @@ templateBox[code_String] := Block[{boxes, prepped = mdToTemplateSubs[StringTrim[
    (in $docContext or System`); ParseTextTemplate by itself does not link a
    page's own symbol, but a "<code>[Self]()</code>" reference should still
    render as a tappable link to the symbol's own ref page. *)
+(* unescape markdown's backslash-punctuation in a prose-bearing context (link
+   labels, <code>...</code> bodies). Wolfram named-character escapes
+   ("\[Theta]", "\[CircleTimes]", ...) share the leading "\[" with markdown's
+   "\[" escape for a literal "[", so the Wolfram-name rule runs FIRST: at a
+   "\[CircleTimes]" position it matches and rebuilds the escape verbatim,
+   blocking the punctuation rule from eating the "\" and turning the kernel
+   char into a stray "[CircleTimes]". *)
+unescapeMarkdownPunctuation[s_String] := StringReplace[s, {
+    "\\[" ~~ name : (LetterCharacter ..) ~~ "]" :> "\\[" <> name <> "]",
+    "\\" ~~ c : PunctuationCharacter :> c
+}]
+
 codeInlineCell[inner_String] := Block[{sig, head, url, boxes, unescaped},
     (* "<code>...</code>" content lets markdown formatting through (links,
        italics, math), so backslash-punctuation escapes inside it are markdown
@@ -1515,18 +1538,8 @@ codeInlineCell[inner_String] := Block[{sig, head, url, boxes, unescaped},
        <code> would land in the .nb as literal "\*" instead of "*", which a
        markdown viewer renders as just "*" but the notebook would show the
        backslash. Backticked spans skip this because backticks freeze content
-       by design - "\*" in `` `code` `` is meant to be literal.
-
-       Wolfram named-character escapes ("\[Theta]", "\[CircleTimes]", ...)
-       share the leading "\[" with the markdown "\[" escape for a literal "[",
-       so list the Wolfram-name rule FIRST: at a "\[CircleTimes]" position
-       it matches and rebuilds the escape verbatim, blocking the punctuation
-       rule from eating the "\" and turning the kernel char into a stray
-       "[CircleTimes]" that the inferred-link parser would then auto-link. *)
-    unescaped = StringReplace[inner, {
-        "\\[" ~~ name : (LetterCharacter ..) ~~ "]" :> "\\[" <> name <> "]",
-        "\\" ~~ c : PunctuationCharacter :> c
-    }];
+       by design - "\*" in `` `code` `` is meant to be literal. *)
+    unescaped = unescapeMarkdownPunctuation[inner];
     sig = mathArgsToTemplate @ unwrapMarkdownSig @ unescaped;
     head = First[StringCases[sig,
         StartOfString ~~ h : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) :> h, 1], ""];
@@ -1732,11 +1745,14 @@ linkInline[text_String, url_String] := Which[
        as literal text. *)
     url === "" && backtickedQ[text], linkInferred[StringTake[text, {2, -2}]],
     url === "" && symbolLikeQ[text], linkInferred[text],
-    url === "", text,
-    (* a `code`-wrapped label is a code-styled reference link *)
+    url === "", unescapeMarkdownPunctuation[text],
+    (* a `code`-wrapped label is a code-styled reference link; backslash escapes
+       inside the backticks are literal, so the stripped content is used as-is. *)
     backtickedQ[text], Cell[BoxData @ linkButton[StringTake[text, {2, -2}], url], "InlineFormula"],
-    (* a plain label is an ordinary prose hyperlink *)
-    True, linkButton[text, url]
+    (* a plain label is an ordinary prose hyperlink; markdown's \<punct> escapes
+       in the label (e.g. "[Wolfram\`Parser\`](paclet:...)") unescape before the
+       ButtonBox so the displayed text doesn't keep the literal backslashes. *)
+    True, linkButton[unescapeMarkdownPunctuation[text], url]
 ]
 
 (* the ref-page URI a bare symbol name resolves to: a name in the documented

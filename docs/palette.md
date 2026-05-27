@@ -116,9 +116,12 @@ where `n` is `1`/`2`/`3`/`4` for Function/Guide/TechNote/Overview.
 `MarkdownToNotebook` reads the GitHub-flavored pipe table
 (`\| a \| b \|` rows + `\|---\|---\|` separator) into a single `Cell` of
 style `2ColumnTableMod` or `3ColumnTableMod` (depending on column count) -
-the same cell the palette inserts here. The cells in each table column
-are `Cell[…, "TableText"]` (text) or `Cell[…, "ModInfo"]` (the
-modification-indicator column on the left).
+the same cell the palette inserts here. Each row is prefixed by a fixed
+`Cell["      ", "ModInfo"]` (the narrow modification-indicator column on
+the left, always a whitespace placeholder), followed by the N content
+cells as `Cell[…, "TableText"]`. So a 3-column pipe table becomes a
+4-cell-wide `GridBox` (ModInfo + 3 TableText), matching the palette's
+template.
 
 | Button | Action (`DocumentationTools``…) | Cell style | Markdown | Status |
 |---|---|---|---|---|
