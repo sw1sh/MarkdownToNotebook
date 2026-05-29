@@ -254,6 +254,19 @@ MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
 MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", "Evaluate" -> False]
 ```
 
+### EvaluateSeparator
+
+Controls when the per-document evaluation context is reset while example cells are run in sequence. A reset clears every symbol the document has defined in its private `MTNB$…` context and `ClearSystemCache[]`s, and the cumulative-hash chain that the example cache is keyed by also restarts - so cache validity is local to one section instead of the whole notebook. The host session's `Global`` context is never touched.
+
+- `"EvaluateSeparator" -> Automatic` *(default)* - reset at every `---` thematic break and at every heading (at any level), so each (sub)section starts with a clean context. Two cells under the same heading share state; the next heading or `---` wipes it.
+- `"EvaluateSeparator" -> None` - never reset; the whole notebook shares one context and one cumulative-hash chain. This is the historical M2N behaviour and is useful when one section depends on a symbol defined further up.
+- `"EvaluateSeparator" -> All` - reset before *every* executable cell. Each cell runs in a fresh context and its cache key depends only on its own code (so two cells with identical text always cache-hit, but neither can see definitions from prior cells).
+
+```wl
+#| screenshot: true
+MarkdownToNotebook["## A\n\n```wl\nx = 1\n```\n\n```wl\nx + 10\n```\n\n## B\n\n```wl\nValueQ[x]\n```", "EvaluateSeparator" -> Automatic]
+```
+
 ## Applications
 
 `MarkdownToNotebook` fills every Wolfram Repository definition notebook from plain markdown, so authors never edit notebook cell styles by hand. The samples below live under [`examples/`](https://github.com/sw1sh/MarkdownToNotebook/tree/main/examples) in the repository; `examples/build.wls` builds each one and `DeployResource`-style `CloudDeploy[ResourceObject[nb], …, Permissions -> "Public"]`s it under a stable public URL, so every link below resolves to the live deployed notebook.

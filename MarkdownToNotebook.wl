@@ -466,21 +466,39 @@ sectionText[sections_, key_] := StringRiffle[
 
 (* === notebook evaluation with a cumulative-hash cache ===
    All executable cells are evaluated in document order, threading state, so a
-   cell's cache key depends on every cell before it (whole-notebook sequence).
-   A thematic break ("---") in the source resets the chain: the next cell's
-   hash is built only from cells after the break, and accumEval clears the
-   per-document eval context + ClearSystemCache[] at the same point, so two
-   sections separated by "---" never share definitions or cache keys. The
-   input here is the interleaved sequence of executable code blocks and
-   "Separator" blocks; the returned list has one hash per executable cell
-   (separators contribute a reset, not a hash). *)
+   cell's cache key depends on every cell before it. The "EvaluateSeparator"
+   MarkdownToNotebook option picks the granularity of isolation between
+   cells:
+     None      - no reset; the whole notebook shares one eval context
+                 and the cumulative-hash chain spans every cell (the
+                 historical M2N behaviour).
+     Automatic - reset at "---" thematic breaks and at every heading,
+                 at any level (the default - each (sub)section runs
+                 in a clean context, with cache keys local to it).
+     All       - reset before every executable cell, so each cell runs
+                 in a fresh context with its hash depending only on
+                 its own code (maximum isolation, minimum cache reuse).
+   A reset clears every symbol in the doc's private context and
+   ClearSystemCache[]s; the host session's Global` is left untouched. The
+   input list interleaves executable cells, "Separator" blocks, and
+   "Heading" blocks; the returned hash list has one entry per executable
+   cell (boundaries contribute a reset, not a hash). *)
 
-cumulativeHashes[items_List] := Block[{acc = "", hashes = {}},
+resetBoundaryQ[mode_, item_] := Switch[mode,
+    None,        False,
+    All,         MatchQ[item["Type"], "Separator" | "Heading"] || executableQ[item],
+    _Automatic | Automatic, MatchQ[item["Type"], "Separator" | "Heading"],
+    _,           MatchQ[item["Type"], "Separator" | "Heading"]
+]
+
+cumulativeHashes[mode_, items_List] := Block[{acc = "", hashes = {}},
     Scan[
-        item |-> If[item["Type"] === "Separator",
-            acc = "",
-            acc = acc <> mdSep <> item["Code"]; AppendTo[hashes, Hash[acc]]
-        ],
+        item |-> (
+            If[resetBoundaryQ[mode, item], acc = ""];
+            If[executableQ[item],
+                acc = acc <> mdSep <> item["Code"]; AppendTo[hashes, Hash[acc]]
+            ]
+        ),
         items
     ];
     hashes
@@ -596,26 +614,33 @@ captureMessages[expr_] := Block[{msgFile, stream, res, txt, msgs},
 ]
 SetAttributes[captureMessages, HoldFirst]
 
-accumEval[state_, b_] := If[b["Type"] === "Separator",
-    (* a "---" thematic break resets the evaluation environment: clear every
-       symbol the document defined in its private context, drop the cumulative
-       code chain so the next cell's cache key starts fresh, and ClearSystemCache[]
-       so any AutoMemoization / Once entries the section accumulated do not leak
-       into the next section. The host session's Global` context and unrelated
-       paclets are left alone - only the per-doc context is wiped. *)
+(* clear every symbol the document defined in its private context, drop the
+   cumulative code chain so the next cell's cache key starts fresh, and
+   ClearSystemCache[] so any AutoMemoization / Once entries do not leak. The
+   host session's Global` context and unrelated paclets are left alone -
+   only the per-doc context is wiped. *)
+resetState[state_] := (
     Quiet @ ClearAll[Evaluate[state["ctx"] <> "*"]];
     ClearSystemCache[];
     <|state, "code" -> ""|>
-    ,
-    Block[{code = state["code"] <> mdSep <> b["Code"], res, msgs, tmp},
-        (* Get a temp package so every top-level statement runs (ToExpression on a
-           multi-statement string only takes the first); Get returns the last value. *)
-        tmp = FileNameJoin[{$TemporaryDirectory, "mtnb-cell-" <> IntegerString[Hash[code], 36] <> ".wl"}];
-        Export[tmp, b["Code"], "Text"];
-        {res, msgs} = captureMessages @ Get[tmp];
-        <|state, "code" -> code,
-          "out" -> Append[state["out"], Hash[code] -> <|"out" -> outputBoxes[res, b["Options"]], "msgs" -> msgs|>]|>
-    ]
+)
+
+evalCell[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res, msgs, tmp},
+    (* Get a temp package so every top-level statement runs (ToExpression on a
+       multi-statement string only takes the first); Get returns the last value. *)
+    tmp = FileNameJoin[{$TemporaryDirectory, "mtnb-cell-" <> IntegerString[Hash[code], 36] <> ".wl"}];
+    Export[tmp, b["Code"], "Text"];
+    {res, msgs} = captureMessages @ Get[tmp];
+    <|state, "code" -> code,
+      "out" -> Append[state["out"], Hash[code] -> <|"out" -> outputBoxes[res, b["Options"]], "msgs" -> msgs|>]|>
+]
+
+(* fold step: per "EvaluateSeparator" mode, reset before this item if it is a
+   boundary, then evaluate if it is an executable cell. Separator / Heading
+   blocks just trigger a reset; in mode All every executable cell triggers a
+   reset before its own evaluation. *)
+accumEval[state_, b_] := With[{s = If[resetBoundaryQ[state["mode"], b], resetState[state], state]},
+    If[executableQ[b], evalCell[s, b], s]
 ]
 
 (* Pre-load every package whose first use during evaluation would otherwise
@@ -652,9 +677,9 @@ preloadContextPath[ctxPath_List] := Quiet @ Scan[
 
 (* a front end is active for the whole pass so an example may open the notebook it
    produces (NotebookPut) and have its thumbnail captured (see outputBoxes). *)
-evaluateAll[items_List, ctx_String, ctxPath_List] := Block[{$Context = ctx, $ContextPath = ctxPath},
+evaluateAll[items_List, ctx_String, ctxPath_List, mode_] := Block[{$Context = ctx, $ContextPath = ctxPath},
     preloadContextPath[ctxPath];
-    UsingFrontEnd[Fold[accumEval, <|"code" -> "", "out" -> <||>, "ctx" -> ctx|>, items]]["out"]
+    UsingFrontEnd[Fold[accumEval, <|"code" -> "", "out" -> <||>, "ctx" -> ctx, "mode" -> mode|>, items]]["out"]
 ]
 
 (* attach each executable block's output (by cumulative hash) so builders read
@@ -3491,7 +3516,7 @@ withMarkdownSource[Notebook[cells_, o : OptionsPattern[]], src_String, tmpl_Stri
 ]
 withMarkdownSource[other_, _, _] := other
 
-Options[MarkdownToNotebook] = {"Evaluate" -> True, "PreserveSource" -> False}
+Options[MarkdownToNotebook] = {"Evaluate" -> True, "PreserveSource" -> False, "EvaluateSeparator" -> Automatic, "MathFont" -> Automatic}
 
 (* spec is an *optional* second argument (default Automatic). Do not split this
    into a separate 1-argument form that forwards to the 3-argument one: an empty
@@ -3512,6 +3537,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
        OptionValue::optnf, leaving evalExamples False so nothing is ever evaluated). *)
     evalExamples = TrueQ[Lookup[Flatten[{opts}], "Evaluate", True]],
     preserveSource = TrueQ[Lookup[Flatten[{opts}], "PreserveSource", False]],
+    evalSeparator = Lookup[Flatten[{opts}], "EvaluateSeparator", Automatic],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
     orderedCode, hashes, cached, allHit, outputs, data, filled
 },
@@ -3529,15 +3555,16 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     (* evaluate every executable cell in document order, threading state in a
        private context (so the document's own code can't clobber the live
        session), cached by a cumulative hash of all cells up to each one.
-       "---" thematic breaks are picked up alongside the executable cells so
-       the evaluator can reset the context + cumulative-hash chain at each
-       separator (see cumulativeHashes / accumEval). *)
+       "---" thematic breaks and headings (at any level) are picked up
+       alongside the executable cells so the evaluator can reset the context
+       + cumulative-hash chain at each boundary (see resetBoundaryQ /
+       cumulativeHashes / accumEval). *)
     (* recurse into Div blocks so executable cells nested inside ::: fenced
        divs (exercises, solutions, solved-examples, ...) get evaluated and
        cached alongside the top-level cells. *)
     orderedCode = Cases[blocks,
-        b_ /; (executableQ[b] || b["Type"] === "Separator"), Infinity];
-    hashes = cumulativeHashes[orderedCode];
+        b_ /; (executableQ[b] || MatchQ[b["Type"], "Separator" | "Heading"]), Infinity];
+    hashes = cumulativeHashes[evalSeparator, orderedCode];
     ctx = "MTNB$" <> IntegerString[Hash[text], 36] <> "`";
     (* let example cells resolve the documented paclet's symbols unqualified, plus
        MarkdownToNotebook's own context so self-referential examples (a doc whose
