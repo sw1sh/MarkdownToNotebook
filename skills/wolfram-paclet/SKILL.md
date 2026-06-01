@@ -41,6 +41,7 @@ MainGuide: Documentation/English/Guides/PacletName.nb
 License: MIT
 WolframVersion: 14.0+
 Categories: [Visualization & Graphics]
+Disclosures: [LocalFiles, ExternalServices]
 Sources: ["A bibliographic citation"]
 SourceControlURL: https://github.com/you/PacletName
 Links: ["[label](https://example.com)"]
@@ -65,6 +66,22 @@ Notebook Documents & Presentation, Scientific and Medical Data & Computation,
 Social, Cultural & Linguistic Data, Sound & Video, Strings & Text,
 Symbolic & Numeric Computation, System Operation & Setup,
 Time-Related Computation, User Interface Construction, Visualization & Graphics.
+
+`Disclosures` toggles the standalone disclosure checkboxes in the Paclet template's
+**Disclosures** section. Each name is independent (unlike Categories these are
+nine separate checkboxes, not one CheckboxesCell). Only set the ones whose trigger
+your paclet actually meets - the submission reviewer reads them. Valid set
+(from the Paclet template's `CheckboxBox` `{False, name}` tags):
+
+- `LocalFiles` - creates / deletes / modifies / imports local files (the loader's own IO is excepted).
+- `ExternalServices` - calls non-Wolfram network services (REST APIs, web scraping, sockets, ...).
+- `LocalSystemInteractions` - shells out to external processes, reads the clipboard, controls another app, accesses sensors.
+- `OSConfiguration` - mutates OS-level settings (environment variables, scheduled tasks, registry, ...).
+- `PacletDependencies` - depends on other paclets being installed.
+- `WLSystemConfiguration` - mutates the kernel environment: `$ContextPath`, `$Path`, persistent values, persistent objects, ...
+- `WLSystemSymbols` - defines or `Set`s values on `` System` `` symbols (or another paclet's context).
+- `WolframAccount` - uses Wolfram ID, the user's cloud account / cloud objects, Wolfram credits, scheduled cloud tasks, WolframAlpha calls.
+- `Other` - any disclosure not covered above (describe it in the section's text area).
 
 ## Sections
 

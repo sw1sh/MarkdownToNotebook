@@ -2687,6 +2687,36 @@ resolveTemplateExpressions[template_, meta_] := template /. te : (_TemplateExpre
 (* resource definition notebooks (Function Repository, Paclet Repository): fill
    the official template's slots and keep everything else (stylesheet + docked
    Deploy/Submit toolbar) intact, so the .nb is publishable as-is. *)
+(* Paclet template's nine canonical disclosure checkboxes.  Each appears in
+   the produced notebook as a standalone CheckboxBox[False, {False, name}]
+   whose `name` is one of these tags; ticking it switches the current value
+   from False to the tag string ({False, tag} is the {off, on} pair).  The
+   resource system's CheckboxesCell autofails on Property -> "Disclosures",
+   so unlike Categories / CompatibilityFeatures these are filled by
+   walking the template and flipping the matching boxes individually.
+   Authors set them via a frontmatter list: Disclosures: [LocalFiles,
+   ExternalServices].  Unknown names are silently ignored. *)
+$pacletDisclosureNames = {
+    "LocalFiles", "ExternalServices", "LocalSystemInteractions",
+    "OSConfiguration", "PacletDependencies", "WLSystemConfiguration",
+    "WLSystemSymbols", "WolframAccount", "Other"
+}
+
+applyPacletDisclosures[nb_, meta_Association] := With[{
+    want = Intersection[
+        asList @ Lookup[meta, "Disclosures", {}],
+        $pacletDisclosureNames
+    ]
+},
+    If[ want === {},
+        nb,
+        nb /. Verbatim[CheckboxBox][False, {False, tag_String}] /; MemberQ[want, tag] :>
+            CheckboxBox[tag, {False, tag}]
+    ]
+]
+applyPacletDisclosures[other_, _] := other
+
+
 resourceNotebook[resourceType_String, data0_] := Block[{template, data = Append[data0, "resourceType" -> resourceType]},
     Needs["DefinitionNotebookClient`"];
     template = DefinitionNotebookClient`DefinitionTemplate[resourceType];
@@ -2700,6 +2730,11 @@ resourceNotebook[resourceType_String, data0_] := Block[{template, data = Append[
     (* ReplaceRepeated: some slots (e.g. the Compatibility group) nest sub-slots
        inside their DefaultValue, which a single pass would not reach. *)
     template = template //. TemplateSlot[n_, o___] :> Sequence @@ fillSlot[n, {o}, data];
+    (* "Disclosures: [list]" frontmatter toggles the named Paclet disclosure
+       checkboxes (see applyPacletDisclosures); a no-op for templates whose
+       Disclosures section has no such checkboxes, or for documents that
+       omit the frontmatter key. *)
+    template = applyPacletDisclosures[template, data["meta"]];
     (* the template seeds a blank standalone usage-input placeholder beside the
        Usage slot (for a second usage line); we fill all usage from the markdown,
        so drop any UsageInputs cell with no real content (matched by emptiness,

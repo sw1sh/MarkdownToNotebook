@@ -112,10 +112,41 @@ Frontmatter: `Name`, `Description`, `Context`, `Paclet`, `PacletDirectory`,
 `SourceControlURL`, `Keywords`, `Links`, `ContributedBy`. Examples load the
 paclet (`Context`) via the `ExampleInitialization` cells and demonstrate it.
 
-`Disclosures` (local files, external services, ...) stay unchecked by default,
-which is correct for a self-contained library; `CheckboxesCell` cannot
-auto-generate the Paclet disclosure grid, so asserting one needs a manual
-checkbox toggle. `PrimaryContext`, `MainGuidePage` and the license radio are
+`Disclosures` are the nine standalone checkboxes the Paclet template ships
+with in its **Disclosures** section. Unlike `Categories`,
+`CompatibilityFeatures` etc. (single `CheckboxesCell` grids that the resource
+system auto-populates from its own item list), each disclosure is its own
+`CheckboxBox` cell with a fixed name and tooltip:
+
+| Frontmatter token         | Display label              | Trigger                                                                                                  |
+|---------------------------|----------------------------|----------------------------------------------------------------------------------------------------------|
+| `LocalFiles`              | Local files                | creates / deletes / modifies / imports local files (loading-time IO excepted)                            |
+| `ExternalServices`        | External services          | calls non-Wolfram network services (REST APIs, web scraping, sockets, ...)                               |
+| `LocalSystemInteractions` | Local system interactions  | shells out to external processes, reads the clipboard, controls another app, accesses sensors            |
+| `OSConfiguration`         | OS configuration           | modifies OS-level settings (environment variables, scheduled tasks, registry, ...)                       |
+| `PacletDependencies`      | Paclet dependencies        | requires other paclets to be installed                                                                   |
+| `WLSystemConfiguration`   | WL system configuration    | mutates the kernel environment - `$ContextPath`, `$Path`, persistent values, persistent objects, ...     |
+| `WLSystemSymbols`         | WL system symbols          | defines or `Set`s values on `` System` `` symbols (or another paclet's context)                          |
+| `WolframAccount`          | Wolfram account            | uses Wolfram ID, the user's cloud account / cloud objects, Wolfram credits, scheduled cloud tasks, WolframAlpha calls |
+| `Other`                   | Other                      | any disclosure not covered above (give a description in the section's text area)                         |
+
+Authors list the applicable ones in the frontmatter (matches the existing
+list-style keys like `Categories`):
+
+```
+Disclosures: [LocalFiles, ExternalServices]
+```
+
+M2N walks the produced Paclet notebook for `CheckboxBox[False, {False, name}]`
+cells whose tag matches one of the names in `Disclosures` and flips them to
+`CheckboxBox[True, {True, name}]`. The accompanying text area of each
+disclosure (where the author would normally describe *what* the paclet does
+in that category) can be filled by writing a `## Disclosures` section with
+subheadings matching the display labels - though that authoring path is
+optional; an unchecked disclosure stays empty, a checked one with no body
+just shows the canonical tooltip.
+
+`PrimaryContext`, `MainGuidePage` and the license radio are
 driven through `TemplateExpression`/`TemplateIf` and scalar slots, resolved in
 the first pass (see above). `MyPublisherID/MyPaclet` strings that remain are the
 template's ⓘ help-tooltip examples, not unfilled slots.
