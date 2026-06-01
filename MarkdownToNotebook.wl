@@ -25,7 +25,10 @@ If[ PacletFind["Wolfram/WolframParser"] === {},
         ]
     ]
 ]
-Needs["Wolfram`Parser`"]
+(* Best-effort: if no parser is reachable, MTN still loads and the math path
+   falls back to ImportString (see wolframParserTeX, which gates on the symbol
+   existing at call time rather than on this load succeeding). *)
+Quiet @ Check[Needs["Wolfram`Parser`"], Null]
 
 mdSep = "\n(*--cell--*)\n"
 
@@ -1627,6 +1630,13 @@ $docPaclet = ""
 $docContext = ""
 $docTemplate = ""
 
+(* the font family LaTeX math (LaTeXMathParse output) is restyled to, so authored
+   math renders in a Computer-Modern-like face rather than the front end's default
+   math font. "" leaves the parser output untouched; a family name (e.g.
+   "CMU Serif") rewrites every math expression to that family. Set per build from
+   the "MathFont" option (see applyMathFont). *)
+$mathFontFamily = ""
+
 (* Subscripts in a usage signature use the portable HTML form "x<sub>i</sub>" (works
    in every markdown renderer and on GitHub), with "x~i~" accepted as the Pandoc
    shorthand. Both forms are rewritten to ParseTextTemplate's "x$i" template form
@@ -1800,19 +1810,45 @@ inlineImage[alt_String, src_String] := Block[{img = Quiet @ Import[src]},
    (the built-in importer that drops styling) when the paclet isn't
    available, and to a Wolfram-expression parse if that also fails. *)
 
+(* Restyle LaTeXMathParse output to $mathFontFamily by delegating to the parser
+   paclet's LaTeXMathStyle - it remaps italic letters to their math-italic
+   codepoints for an OpenType math font, pulls \mathbb into MSBM10, and wraps in
+   the family.  Resolved at runtime by full name (so load order doesn't capture
+   the wrong symbol) and guarded on it existing, so MTN still works - unstyled -
+   when the parser isn't available (e.g. the ImportString fallback path). *)
+applyMathFont[boxes_] := Which[
+    $mathFontFamily === "" || boxes === $Failed, boxes,
+    Names["Wolfram`Parser`LaTeXMathStyle"] =!= {},
+        Symbol["Wolfram`Parser`LaTeXMathStyle"][boxes, $mathFontFamily],
+    True, boxes
+]
+
 texBoxes[math_String] :=
     Block[{r = wolframParserTeX[math]},
-        If[ r =!= $Failed, r, texBoxesViaImport[math] ]
+        applyMathFont @ If[ r =!= $Failed, r, texBoxesViaImport[math] ]
     ]
 
-wolframParserTeX[math_String] := 
-    If[ ! ValueQ[LaTeXMathParse],
+(* Detection and call both resolve the parser at *runtime* by its full name.
+   Two traps this avoids: (1) LaTeXMathParse has only DownValues, so the obvious
+   ValueQ[LaTeXMathParse] gate is always False and would reject a perfectly loaded
+   parser; (2) an unqualified `LaTeXMathParse` token is captured to whatever
+   context is active when this file is read - if the paclet loads later, that
+   token names a different (empty) symbol. Symbol["Wolfram`Parser`LaTeXMathParse"]
+   always names the real one once the context exists. Success is judged by the
+   result being box-like; a parse failure returns ParseError[...]/$Failed, which
+   falls through to the ImportString path. *)
+wolframParserTeX[math_String] :=
+    If[ Names["Wolfram`Parser`LaTeXMathParse"] === {},
         $Failed,
-        Block[{r = Quiet @ Check[
-            LaTeXMathParse[math],
-            $Failed
-        ]},
-            If[MatchQ[r, _ParseError | $Failed | _Failure], $Failed, r]
+        Module[{r = Quiet @ Check[Symbol["Wolfram`Parser`LaTeXMathParse"][math], $Failed]},
+            (* Accept whatever boxes the parser returns; only reject its known
+               failure shapes. Head is matched by short name so a ParseError from
+               the paclet's own context still trips it regardless of how this file
+               captured the bare symbol. *)
+            If[ MatchQ[r, $Failed | _Failure] || SymbolName[Head[r]] === "ParseError" || ! FreeQ[r, $Failed],
+                $Failed,
+                r
+            ]
         ]
     ]
 
@@ -3609,6 +3645,9 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     blocks = resolveIncludes[parsed["Blocks"], src["Base"]];
     tmplName = Lookup[meta, "Template", "Default"];
     $docTemplate = tmplName;
+    (* Automatic (default) leaves math in the front end's native math font; a
+       family name restyles all LaTeX math to it (see applyMathFont). *)
+    $mathFontFamily = Replace[Lookup[Flatten[{opts}], "MathFont", Automatic], Automatic -> ""];
 
     (* evaluate every executable cell in document order, threading state in a
        private context (so the document's own code can't clobber the live
@@ -3639,7 +3678,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     outputs = Which[
         ! evalExamples || $convertDepth > 2, <||>,
         allHit, cached,
-        True, evaluateAll[orderedCode, ctx, ctxPath]
+        True, evaluateAll[orderedCode, ctx, ctxPath, evalSeparator]
     ];
     If[ evalExamples && $convertDepth <= 2 && Not[allHit], KeyValueMap[exampleCacheSet, outputs] ];
 

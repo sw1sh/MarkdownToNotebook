@@ -155,6 +155,27 @@ userOpts = FilterRules[{opts}, Options[Graph]] /.
 Graph[vs, es, Sequence @@ userOpts, VertexLabels -> myLabels]
 ```
 
+### Never `Sequence @@ listOfOptions` into an `OptionsPattern[]` slot
+
+`OptionsPattern[]` matches a bare list of rules just as well as a
+flat sequence, so passing `listOfOptions` directly is fine wherever
+the function's arguments allow it. Don't splat it with
+`Sequence @@` - that's noise.
+
+```wolfram
+opts = FilterRules[{userOpts}, Options[Graph]];
+
+(* GOOD: the list is matched by OptionsPattern[] as-is *)
+Graph[vs, es, opts]
+
+(* BAD: ceremonial splat *)
+Graph[vs, es, Sequence @@ opts]
+```
+
+Reach for `Sequence @@` only when the surrounding arguments genuinely
+forbid a nested list (e.g. you must interleave the options with other
+trailing arguments that a list would shadow).
+
 ## Definitions
 
 Prefer `Block` for local workspaces unless `Module`'s unique-symbol
