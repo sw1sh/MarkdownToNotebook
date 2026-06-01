@@ -65,11 +65,16 @@ deployedURL[obj_] := Replace[obj, {
 cloudReady = TrueQ[$CloudConnected] || (Quiet @ CloudConnect[]; TrueQ[$CloudConnected])
 If[ ! cloudReady, Print["  warn: not cloud-connected, deploy steps will be skipped"] ]
 
+(* Example / resource notebooks define shared data in one section (e.g. a
+   Data resource's "## Content" cell) and use it from the example sections, so
+   they must evaluate under a single eval context. EvaluateSeparator -> None
+   keeps the whole notebook in one context; the default Automatic resets at
+   every heading, which would clear those definitions before the examples run. *)
 Scan[
     src |-> Block[{result, nb, outNb, deployed},
-        result = MarkdownToNotebook[src, "Association"];
+        result = MarkdownToNotebook[src, "Association", "EvaluateSeparator" -> None];
         nb = result["Notebook"];
-        outNb = MarkdownToNotebook[src, FileNameJoin[{dir, FileBaseName[src] <> ".nb"}]];
+        outNb = MarkdownToNotebook[src, FileNameJoin[{dir, FileBaseName[src] <> ".nb"}], "EvaluateSeparator" -> None];
         Print["  ", FileNameTake[src]];
         Print["    Template:       ", result["Template"]];
         Print["    Name:           ", result["Metadata"]["Name"]];
