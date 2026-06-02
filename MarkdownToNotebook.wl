@@ -3571,9 +3571,39 @@ markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n
    PersistentObjects["MarkdownToNotebook/**"] to list, DeleteObject to clear, and
    $PersistencePath / PersistenceLocation to relocate. *)
 $cacheLocation = "Local"
-exampleCacheName[h_Integer] := "MarkdownToNotebook/ExampleOutput/" <> IntegerString[h, 36]
-exampleCacheGet[h_Integer] := PersistentSymbol[exampleCacheName[h], $cacheLocation]
-exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheLocation] = v;)
+
+(* Sanitise a doc name for use in a PersistentObject path.  The frontmatter
+   "Name" is the canonical identifier ("Wolfram/PureMath", "ReverseAddSequence",
+   ...); we keep "/", "-", ".", "_" and word characters so the namespace path
+   is hierarchical (a publisher-prefixed name like "Wolfram/PureMath" maps to a
+   nested namespace) and replace anything else with "_".  Empty or all-special
+   names fall back to "unnamed". *)
+sanitiseDocNameForCache[s_String] := With[{
+    cleaned = StringTrim[StringReplace[s, Except[WordCharacter | "-" | "." | "/"] -> "_"], "/"]
+},
+    If[cleaned === "", "unnamed", cleaned]
+]
+sanitiseDocNameForCache[_] := "unnamed"
+
+(* Cache entry name: human-searchable per doc + per cell, content-addressed by
+   the cumulative hash.  Layout
+
+       MarkdownToNotebook/ExampleOutput/<DocName>/<NNN>-<hashB36>
+
+   PersistentObjects["MarkdownToNotebook/ExampleOutput/Wolfram/PureMath/*",
+   "Local"] returns every entry for the PureMath doc; cell-001/cell-002 sort
+   lexicographically so the entries enumerate in evaluation order.  The
+   hashB36 suffix preserves the content-addressing - changing a cell's code
+   yields a new hash and a fresh entry; the previous stale entry orphans
+   under the same NNN prefix and is easy to spot when grepping. *)
+exampleCacheName[docName_String, cellIdx_Integer, h_Integer] :=
+    "MarkdownToNotebook/ExampleOutput/" <>
+        sanitiseDocNameForCache[docName] <>
+        "/" <> IntegerString[cellIdx, 10, 3] <>
+        "-" <> IntegerString[h, 36]
+
+exampleCacheGet[name_String] := PersistentSymbol[name, $cacheLocation]
+exampleCacheSet[name_String, v_] := (PersistentSymbol[name, $cacheLocation] = v;)
 
 (* === entry point === *)
 
@@ -3633,7 +3663,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     preserveSource = TrueQ[Lookup[Flatten[{opts}], "PreserveSource", False]],
     evalSeparator = Lookup[Flatten[{opts}], "EvaluateSeparator", Automatic],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
-    orderedCode, hashes, cached, allHit, outputs, data, filled
+    orderedCode, hashes, cacheDocName, cacheNames, cached, allHit, outputs, data, filled
 },
     src = resolveSource[file];
     text = src["Text"];
@@ -3662,12 +3692,19 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     orderedCode = Cases[blocks,
         b_ /; (executableQ[b] || MatchQ[b["Type"], "Separator" | "Heading"]), Infinity];
     hashes = cumulativeHashes[evalSeparator, orderedCode];
+    (* build a per-cell PersistentObject name keyed by (DocName, cellIndex, hash).
+       The doc name comes from the frontmatter Name when present (e.g.
+       "Wolfram/PureMath") and falls back to the source's file basename;
+       cellIndex is 1-based in evaluation order; the hash preserves
+       content-addressing.  See exampleCacheName for the layout. *)
+    cacheDocName = If[$docName === "", src["Name"], $docName];
+    cacheNames = MapIndexed[exampleCacheName[cacheDocName, First[#2], #1] &, hashes];
     ctx = "MTNB$" <> IntegerString[Hash[text], 36] <> "`";
     (* let example cells resolve the documented paclet's symbols unqualified, plus
        MarkdownToNotebook's own context so self-referential examples (a doc whose
        examples call MarkdownToNotebook itself) actually evaluate. *)
     ctxPath = DeleteDuplicates @ Flatten @ {Lookup[meta, "Context", Nothing], Context[MarkdownToNotebook], "System`"};
-    cached = AssociationMap[exampleCacheGet, hashes];
+    cached = AssociationThread[hashes -> Map[exampleCacheGet, cacheNames]];
     allHit = hashes =!= {} && AllTrue[cached, ! MissingQ[#] &];
     (* "Evaluate" -> False leaves the example cells unevaluated (input only). An
        example may itself convert another document (so its screenshot shows that
@@ -3680,7 +3717,23 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
         allHit, cached,
         True, evaluateAll[orderedCode, ctx, ctxPath, evalSeparator]
     ];
-    If[ evalExamples && $convertDepth <= 2 && Not[allHit], KeyValueMap[exampleCacheSet, outputs] ];
+    (* Only persist CLEAN outputs - skip entries whose evaluation emitted kernel
+       messages (Get::noopen, Needs::nocont, Failure[...], runtime errors, ...).
+       Otherwise the very first build, before PacletDirectoryLoad or some other
+       env setup is in place, poisons the cache with the failure messages and
+       every subsequent build serves them back even after the env is fixed. *)
+    If[ evalExamples && $convertDepth <= 2 && Not[allHit],
+        MapThread[
+            Function[{h, name},
+                With[{entry = Lookup[outputs, h, Missing[]]},
+                    If[ AssociationQ[entry] && Lookup[entry, "msgs", {}] === {},
+                        exampleCacheSet[name, entry]
+                    ]
+                ]
+            ],
+            {hashes, cacheNames}
+        ]
+    ];
 
     blocks = annotateOutputs[blocks, hashes, outputs];
     sections = sectionsFrom[blocks];
