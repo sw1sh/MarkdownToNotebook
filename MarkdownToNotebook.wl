@@ -17,10 +17,10 @@
 
 Needs["GeneralUtilities`"]
 
-If[ PacletFind["Wolfram/WolframParser"] === {},
+If[ PacletFind["Wolfram/Parser"] === {},
     If[ DirectoryQ["examples/WolframParser"],
         PacletDirectoryLoad["examples/WolframParser"],
-        If[ FailureQ[PacletInstall["Wolfram/WolframParser"]],
+        If[ FailureQ[PacletInstall["Wolfram/Parser"]],
             PacletInstall[ResourceObject["https://wolfr.am/1ECIxdqhB"]]
         ]
     ]
@@ -617,13 +617,16 @@ captureMessages[expr_] := Block[{msgFile, stream, res, txt, msgs},
 ]
 SetAttributes[captureMessages, HoldFirst]
 
-(* clear every symbol the document defined in its private context, drop the
-   cumulative code chain so the next cell's cache key starts fresh, and
-   ClearSystemCache[] so any AutoMemoization / Once entries do not leak. The
-   host session's Global` context and unrelated paclets are left alone -
-   only the per-doc context is wiped. *)
+(* clear every symbol the document defined in its private context (and any
+   nested sub-context it opened, e.g. "Doc`Private`"), drop the cumulative code
+   chain so the next cell's cache key starts fresh, and ClearSystemCache[] so
+   any AutoMemoization / Once entries do not leak. The host session's Global`
+   and unrelated paclets are left alone - only the per-doc context tree is
+   wiped. Two patterns are needed: "ctx`*" matches symbols *in* ctx, and
+   "ctx`**`*" matches symbols in every sub-context underneath ctx (a single
+   "ctx`**" only matches the immediate context, not the nested ones). *)
 resetState[state_] := (
-    Quiet @ ClearAll[Evaluate[state["ctx"] <> "*"]];
+    Quiet @ ClearAll @@ {state["ctx"] <> "*", state["ctx"] <> "**`*"};
     ClearSystemCache[];
     <|state, "code" -> ""|>
 )
