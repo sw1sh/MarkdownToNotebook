@@ -64,6 +64,7 @@ compressed (about 5 MB uncompressed, 26,264 entries):
 
 ```wl
 #| file: TPTPProblemLibrary-index.wl
+#| init: true
 (* tptpIndex = Uncompress["..."]  - the 26,264-entry catalogue index,
    loaded from the generated sidecar file. *)
 ```
@@ -166,12 +167,29 @@ The twelve largest domains by problem count, showing how set theory, number
 theory, and verification dominate the corpus:
 
 ```wl
-top = Take[ReverseSort @ Counts[Values[tptpIndex][[All, "Domain"]]], 12];
+top = ReverseSort @ Counts[Values[tptpIndex][[All, "Domain"]]];
 BarChart[
     Values[top],
-    ChartLabels -> Keys[top],
+    ChartLabels -> Placed[Keys[top], None],
+    LabelingFunction -> Function[Placed[Rotate[#3[[2, 1]], Pi / 2], Below]],
     ChartStyle -> StandardBlue,
     PlotLabel -> "Largest TPTP domains",
+    ImageSize -> 520
+]
+```
+
+The clause-head mix as a bar chart: the first-order forms (`FOF`, `CNF`) tower
+over the typed (`TF0` / `TF1`) and higher-order (`TH0` / `TH1`) families that
+make up the modern tail:
+
+```wl
+heads = ReverseSort @ Counts[Values[tptpIndex][[All, "ClauseHead"]]];
+BarChart[
+    Values[heads],
+    ChartLabels -> Placed[Keys[heads], None],
+    LabelingFunction -> Function[Placed[Rotate[#3[[2, 1]], Pi / 2], Below]],
+    ChartStyle -> StandardBlue,
+    PlotLabel -> "Problems by clause head",
     ImageSize -> 520
 ]
 ```

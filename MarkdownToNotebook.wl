@@ -1046,8 +1046,20 @@ codeBlockQ[b_] := b["Type"] === "Code" && MemberQ[{"wl", "wolfram", "mathematica
 contentSlot[opts_, sections_] := Block[{cells = Cases[Lookup[sections, "content", {}], b_ /; codeBlockQ[b]]},
     If[ cells === {},
         slotDefault[opts],
-        Map[Cell[BoxData[inputBoxes[#["Code"]]], "Input", CellTags -> {"DefaultContent"}] &, cells]
+        Map[contentCell, cells]
     ]
+]
+
+(* A "#| init: true" content cell becomes a collapsed initialization Code cell -
+   mirroring the FunctionResource definition cell - so a long primary-data
+   assignment (e.g. a big Uncompress[...] payload) initializes on open without
+   showing a wall of source in the deployed notebook. Every other content cell
+   stays a visible Input. Both carry the "DefaultContent" tag the scraper needs. *)
+contentCell[b_] := If[
+    TrueQ[Lookup[b["Options"], "init", False]],
+    Cell[BoxData[inputBoxes[b["Code"]]], "Code",
+        CellTags -> {"DefaultContent"}, InitializationCell -> True, CellOpen -> False],
+    Cell[BoxData[inputBoxes[b["Code"]]], "Input", CellTags -> {"DefaultContent"}]
 ]
 
 (* === single-cell-from-section helpers, used by Prompt and Demonstration ===
@@ -1161,8 +1173,13 @@ mathArgsToTemplate[s_String] := StringReplace[s, {
    them. The backticked rule runs first so a "[`X`](url)" does not part-match
    the bare rule and leak its surrounding backticks. *)
 unwrapMarkdownSig[s_String] := StringReplace[s, {
-    "[`" ~~ n : Shortest[Except["`"] ..] ~~ "`](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
-    "[" ~~ n : Shortest[Except["]" | "`" | "\n"] ..] ~~ "](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
+    (* WL-identifier shape only: leading letter / "$", then word chars /
+       "$" / context backticks.  Restricting the label keeps the unwrap
+       from over-matching across WL bracket syntax (e.g.
+       <code>[Function]()[x, [Exp]() @ x]</code> - the outer [x, ...]
+       must not be eaten as if it were a markdown link with label "x, [Exp"). *)
+    "[`" ~~ n : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) ~~ "`](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
+    "[" ~~ n : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) ~~ "](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
     "*" ~~ w : Shortest[Except["*" | " "] ..] ~~ "*" :> w
 }]
 
@@ -1368,7 +1385,9 @@ exampleContent[sectionBlocks_, textStyle_String] := Block[{counter = 0, out = {}
             block["Type"] === "Image",
                 AppendTo[out, imageCell[block]],
             executableQ[block],
-                counter += 1; out = Join[out, exampleIOFor[block, counter]]
+                counter += 1; out = Join[out, exampleIOFor[block, counter]],
+            block["Type"] === "Code",
+                out = Join[out, withCellFlag[block, {Cell[block["Code"], "Program"]}]]
         ],
         {block, sectionBlocks}
     ];

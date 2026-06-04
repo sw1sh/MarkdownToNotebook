@@ -157,7 +157,7 @@ cellMd[Cell[content_, style_String, opts___]] := Block[{txt = cellText[Cell[cont
         "Notes",                    txt,
         "ItemNumbered" | "ItemNumbered1",  "1. " <> txt,
         "Item" | "Item1" | "Item2" | "Bullet",  "- " <> txt,
-        "Code" | "Input" | "ExampleInput",  "```wl\n" <> txt <> "\n```",
+        "Code" | "Input" | "ExampleInput" | "Program",  "```wl\n" <> txt <> "\n```",
         "InlineFormula",            "`" <> txt <> "`",
         _, txt
     ]
