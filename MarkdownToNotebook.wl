@@ -472,25 +472,35 @@ sectionText[sections_, key_] := StringRiffle[
    cell's cache key depends on every cell before it. The "EvaluateSeparator"
    MarkdownToNotebook option picks the granularity of isolation between
    cells:
-     None      - no reset; the whole notebook shares one eval context
-                 and the cumulative-hash chain spans every cell (the
-                 historical M2N behaviour).
      Automatic - reset at "---" thematic breaks and at every heading,
                  at any level (the default - each (sub)section runs
-                 in a clean context, with cache keys local to it).
+                 in a clean context). A reset clears only symbols
+                 INTRODUCED AFTER the document's "## Definition" section
+                 has run; the definition's symbols (the FunctionResource
+                 function, helper bindings) persist across every later
+                 section. The protected baseline is snapshotted at the
+                 first reset that follows the definition section, so an
+                 example that introduces a temp local helper is wiped
+                 between sections but the resource's function is not.
      All       - reset before every executable cell, so each cell runs
                  in a fresh context with its hash depending only on
                  its own code (maximum isolation, minimum cache reuse).
-   A reset clears every symbol in the doc's private context and
-   ClearSystemCache[]s; the host session's Global` is left untouched. The
-   input list interleaves executable cells, "Separator" blocks, and
+                 The same definition-preservation rule applies.
+     None      - no reset; the whole notebook shares one eval context
+                 and the cumulative-hash chain spans every cell.
+                 Supported but not recommended: per-example helpers
+                 leak across every later section, so a stray binding in
+                 ## Basic Examples may collide with names in ## Scope.
+                 Put binding that legitimately needs to cross sections
+                 in the document's ## Definition section, and let
+                 Automatic preserve only it.
+   The input list interleaves executable cells, "Separator" blocks, and
    "Heading" blocks; the returned hash list has one entry per executable
    cell (boundaries contribute a reset, not a hash). *)
 
 resetBoundaryQ[mode_, item_] := Switch[mode,
     None,        False,
     All,         MatchQ[item["Type"], "Separator" | "Heading"] || executableQ[item],
-    _Automatic | Automatic, MatchQ[item["Type"], "Separator" | "Heading"],
     _,           MatchQ[item["Type"], "Separator" | "Heading"]
 ]
 
@@ -676,19 +686,37 @@ captureCellRun[code_String, opts_Association : <||>] := Block[{msgFile, prtFile,
     <|"outs" -> outs, "msgs" -> msgs, "prints" -> prints, "cells" -> cellsExtra|>
 ]
 
-(* clear every symbol the document defined in its private context (and any
-   nested sub-context it opened, e.g. "Doc`Private`"), drop the cumulative code
-   chain so the next cell's cache key starts fresh, and ClearSystemCache[] so
-   any AutoMemoization / Once entries do not leak. The host session's Global`
-   and unrelated paclets are left alone - only the per-doc context tree is
-   wiped. Two patterns are needed: "ctx`*" matches symbols *in* ctx, and
-   "ctx`**`*" matches symbols in every sub-context underneath ctx (a single
-   "ctx`**" only matches the immediate context, not the nested ones). *)
-resetState[state_] := (
-    Quiet @ ClearAll @@ {state["ctx"] <> "*", state["ctx"] <> "**`*"};
-    ClearSystemCache[];
-    <|state, "code" -> ""|>
-)
+(* Snapshot every symbol currently bound in the document context tree -
+   "ctx`*" matches symbols in ctx; "ctx`**`*" matches symbols in every
+   sub-context underneath ctx (a single "ctx`**" only matches the
+   immediate context). *)
+docContextSymbols[ctx_String] := Join[
+    Quiet @ Names[ctx <> "*"],
+    Quiet @ Names[ctx <> "**`*"]
+]
+
+(* A reset clears every symbol introduced AFTER the protected baseline was
+   captured, drops the cumulative code chain so the next cell's cache key
+   starts fresh, and ClearSystemCache[]s so any AutoMemoization / Once
+   entries do not leak. The baseline (state["protected"]) is the set of
+   symbols defined by the document's "## Definition" section - captured
+   at the first reset boundary that follows that section (see accumEval).
+   While protected is still None, the doc hasn't crossed the boundary
+   yet, so nothing is cleared - this lets all "## Definition" code finish
+   without losing its own bindings on the intervening heading boundary
+   inside the definition area.  The host session's Global` and unrelated
+   paclets are left alone - only the per-doc context tree is wiped. *)
+resetState[state_] := If[
+    state["protected"] === None,
+    (* pre-definition area: cumulative code chain still resets so cache
+       keys don't span the boundary, but we keep every bound symbol. *)
+    (ClearSystemCache[]; <|state, "code" -> ""|>),
+    Block[{toRemove = Complement[docContextSymbols[state["ctx"]], state["protected"]]},
+        If[toRemove =!= {}, Quiet @ ClearAll @@ toRemove];
+        ClearSystemCache[];
+        <|state, "code" -> ""|>
+    ]
+]
 
 evalCell[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], captured},
     (* captureCellRun parses b["Code"] into top-level statements via
@@ -702,12 +730,37 @@ evalCell[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], captu
       "out" -> Append[state["out"], Hash[code] -> captured]|>
 ]
 
-(* fold step: per "EvaluateSeparator" mode, reset before this item if it is a
-   boundary, then evaluate if it is an executable cell. Separator / Heading
-   blocks just trigger a reset; in mode All every executable cell triggers a
-   reset before its own evaluation. *)
-accumEval[state_, b_] := With[{s = If[resetBoundaryQ[state["mode"], b], resetState[state], state]},
-    If[executableQ[b], evalCell[s, b], s]
+(* A reset boundary item that follows the definition section is the moment
+   we lock in the protected baseline: snapshot every symbol currently bound
+   in the doc context tree and record it as state["protected"]. The
+   detection is simple - this fires the first time we see a Heading whose
+   text matches a known example section ("Basic Examples", "Scope", etc.)
+   after at least one executable cell has run. For docs without a
+   definition section the baseline ends up empty (snapshot of an empty
+   context), which is the correct degenerate case: every reset clears
+   everything, the historical Automatic behaviour. *)
+$exampleHeadingMatchQ[text_String] := MemberQ[$exampleOrder, ToLowerCase[StringTrim[text]]]
+$exampleHeadingMatchQ[_] := False
+
+captureProtectedQ[state_, b_] :=
+    state["protected"] === None && state["primed"] === True &&
+        b["Type"] === "Heading" && $exampleHeadingMatchQ[b["Text"]]
+
+(* fold step: per "EvaluateSeparator" mode, reset before this item if it is
+   a boundary, then evaluate if it is an executable cell. Separator /
+   Heading blocks just trigger a reset; in mode All every executable cell
+   triggers a reset before its own evaluation. Capture the protected
+   baseline before clearing if this boundary marks the transition into
+   the first example section. *)
+accumEval[state0_, b_] := Block[{state = state0, s},
+    If[ captureProtectedQ[state, b],
+        state = <|state, "protected" -> docContextSymbols[state["ctx"]]|>
+    ];
+    s = If[resetBoundaryQ[state["mode"], b], resetState[state], state];
+    If[executableQ[b],
+        With[{s2 = evalCell[s, b]}, <|s2, "primed" -> True|>],
+        s
+    ]
 ]
 
 (* Pre-load every package whose first use during evaluation would otherwise
@@ -746,7 +799,10 @@ preloadContextPath[ctxPath_List] := Quiet @ Scan[
    produces (NotebookPut) and have its thumbnail captured (see outputBoxes). *)
 evaluateAll[items_List, ctx_String, ctxPath_List, mode_] := Block[{$Context = ctx, $ContextPath = ctxPath},
     preloadContextPath[ctxPath];
-    UsingFrontEnd[Fold[accumEval, <|"code" -> "", "out" -> <||>, "ctx" -> ctx, "mode" -> mode|>, items]]["out"]
+    UsingFrontEnd[Fold[accumEval,
+        <|"code" -> "", "out" -> <||>, "ctx" -> ctx, "mode" -> mode,
+          "protected" -> None, "primed" -> False|>,
+        items]]["out"]
 ]
 
 (* attach each executable block's output (by cumulative hash) so builders read

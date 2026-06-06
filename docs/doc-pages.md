@@ -60,19 +60,46 @@ Symbol skill uses `$x_i$` for subscripted args; `*x_i*` works for that too.)
   boxes, and graphics all serialise to the notebook fine; an Association
   does not.
 
-### State threads only when you opt in - `EvaluateSeparator: None`
+### State across sections - put it in `## Definition`
 
 The default `EvaluateSeparator: Automatic` resets the evaluation context at
-every heading and `---` delimiter, so a binding set in `## Basic Examples`
-is **not** visible in `## Scope`. This is right for a reference page: each
-section reads as a self-contained block.
+every heading and `---` delimiter, so a temp binding set in
+`## Basic Examples` is **not** visible in `## Scope`. This is right for a
+reference page: each section reads as a self-contained block.
 
-A multi-part tutorial that imports a heavy environment up front and queries
-it section by section flips this: add `EvaluateSeparator: None` to the
-frontmatter, import the environment once at the top, and re-use the binding
-through every later section. Do **not** reuse one name for two different
-environments across sections (the later binding silently wins for the whole
-notebook).
+The reset is **not** total, though: any symbol introduced by the document's
+`## Definition` section (the FunctionResource function, a heavy environment
+import, a shared helper) is **preserved** across every later reset. Only
+symbols introduced *after* the definition section get cleared at boundaries.
+So a multi-part tutorial that needs an imported environment across all its
+sections puts the import in `## Definition`:
+
+```md
+## Definition
+
+\`\`\`wl
+env = LeanImport["MyProject"]
+\`\`\`
+
+## Part 1 - Theorems
+
+\`\`\`wl
+env["Theorems"]  (* env still bound here *)
+\`\`\`
+
+## Part 2 - Tactics
+
+\`\`\`wl
+env["Tactics"]  (* still bound here too *)
+\`\`\`
+```
+
+`EvaluateSeparator: None` (no reset at all, one shared context for the
+whole notebook) still works, but **avoid it** - it leaks every
+per-example binding across every later section, so a stray `tmp` in
+`## Basic Examples` can collide with a name in `## Scope`.
+Definition-preservation under Automatic covers the legitimate state-
+threading use case without that risk.
 
 ### `<!-- => expected -->` hints are author-facing only
 
