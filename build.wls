@@ -39,7 +39,7 @@ loadDefinition[src_String] := Block[{text = Import[src, "Text"], includes},
         Print["  including: ", FileNameTake /@ includes];
         Scan[Get, includes]
         ,
-        Block[{boot = FileNameJoin[{$TemporaryDirectory, "mtrf-" <> FileBaseName[src] <> "-boot.wl"}]},
+        Block[{boot = CreateFile[]},
             Export[boot, StringRiffle[definitionCells[text], "\n\n"], "Text"];
             Get[boot]
         ]

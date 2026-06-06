@@ -427,6 +427,36 @@ list or `Association`), never merely because the line grew wide. The IDE
 formatter is configured so whole expressions stay on one line and only
 structure introduces newlines.
 
+## Filesystem
+
+### Temp files: use `CreateFile[]`, don't roll your own
+
+For a short-lived scratch file, use `CreateFile[]` (no args). It
+atomically creates a unique file under the system temp directory and
+returns the absolute path - exactly the contract you usually want. Don't
+hand-build a path under `$TemporaryDirectory` with `FileNameJoin` and a
+random / hash / PID suffix; that's a reinvention of `CreateFile`'s
+guarantee and risks racing or colliding.
+
+```wolfram
+(* GOOD *)
+tmp = CreateFile[];
+Export[tmp, body, "Text"];
+res = Get[tmp];
+DeleteFile[tmp]
+
+(* BAD: hand-built path, no atomicity, ad-hoc collision avoidance *)
+tmp = FileNameJoin[{$TemporaryDirectory,
+    "mypkg-" <> IntegerString[$KernelID, 36] <> "-"
+    <> IntegerString[RandomInteger[10^9], 36] <> ".txt"}];
+Export[tmp, body, "Text"];
+...
+```
+
+Reach for the manual form only when the file needs a recognisable
+filename (e.g. it's surfaced in a user-facing message) or it must live
+in a specific directory other than `$TemporaryDirectory`.
+
 ## Composition
 
 ### `@` chain for unary right-application

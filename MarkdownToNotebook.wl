@@ -630,12 +630,8 @@ printMd[_] := ""
    Failed Get / parse returns "outs" -> {Missing[]} so callers downstream
    still see the failure as a no-output cell rather than a crash. *)
 captureCellRun[code_String, opts_Association : <||>] := Block[{msgFile, prtFile, msgStream, prtStream, stmts, outs, cellsExtra, msgTxt, prtTxt, msgs, prints},
-    msgFile = FileNameJoin[{$TemporaryDirectory,
-        "mtnb-msg-" <> IntegerString[$KernelID, 36] <> "-" <>
-        IntegerString[RandomInteger[10^9], 36] <> ".txt"}];
-    prtFile = FileNameJoin[{$TemporaryDirectory,
-        "mtnb-prt-" <> IntegerString[$KernelID, 36] <> "-" <>
-        IntegerString[RandomInteger[10^9], 36] <> ".txt"}];
+    msgFile = CreateFile[];
+    prtFile = CreateFile[];
     msgStream = OpenWrite[msgFile];
     prtStream = OpenWrite[prtFile];
     stmts = Quiet @ ToExpression[code, InputForm, Hold];
