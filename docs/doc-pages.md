@@ -95,6 +95,18 @@ The build pipeline pins the front end to Light so that the graph outputs which
 *do* rasterize are not inverted - keep that in mind if you author a paclet
 guide that wants Dark.
 
+### Don't hand-convert `...` to `…`
+
+The docked Check fires `ThreeDotEllipsis` whenever it sees a literal `...`
+in prose. **MTN handles this for you**: every prose run (heading, paragraph,
+list item, quote, usage description) gets `...` rewritten to `…` (U+2026)
+on the way to the notebook. The replacement only fires on the plain-text
+runs, so `...` inside backticks, inside an inline `<code>` span, inside
+`$...$` math, or inside a fenced `wl` cell is left untouched - write
+`` `Association[name -> LeanTerm, ...]` `` and `Print["loading..."]` exactly
+as you mean them and the lint will not complain about either. Don't sprinkle
+`…` into source by hand; let MTN do it.
+
 ### Gate heavy examples
 
 Some examples need resources that may be absent on a given build machine - a
