@@ -857,22 +857,26 @@ annotateOutputs[blocks_List, hashes_List, outputs_] := Block[{i = 0, walk},
    doc supplies whatever subset is meaningful, and exampleNotebookSlot renders only
    the present sections in this order. *)
 $exampleOrder = {
-    "basic examples", "scope", "scope & additional elements", "options", "applications",
+    "basic examples", "scope", "scope & additional elements",
+    "generalizations & extensions", "options", "applications",
     "visualizations", "analysis",
-    "properties and relations", "possible issues", "neat examples"
+    "properties and relations", "possible issues", "neat examples",
+    "requirements"
 }
 
 $exampleTitle = <|
     "basic examples" -> "Basic Examples",
     "scope" -> "Scope",
     "scope & additional elements" -> "Scope & Additional Elements",
+    "generalizations & extensions" -> "Generalizations & Extensions",
     "options" -> "Options",
     "applications" -> "Applications",
     "visualizations" -> "Visualizations",
     "analysis" -> "Analysis",
     "properties and relations" -> "Properties and Relations",
     "possible issues" -> "Possible Issues",
-    "neat examples" -> "Neat Examples"
+    "neat examples" -> "Neat Examples",
+    "requirements" -> "Requirements"
 |>
 
 $osCanonical = <|
@@ -2322,13 +2326,6 @@ imageCell[block_] := With[{title = StringTrim @ Lookup[block, "Effect", ""]},
     ]
 ]
 
-docExampleCells[sections_] := Block[{cells = sectionCells[sections, "basic examples"], counter = 0},
-    Catenate @ Map[
-        block |-> (counter += 1; exampleIOFor[block, counter]),
-        cells
-    ]
-]
-
 (* fill the visible Categorization section cells (Entity Type / Paclet Name /
    Context / URI) from the frontmatter, keyed by their CellLabel. *)
 fillCategorization[nb_, type_String, meta_] := Block[{
@@ -2372,9 +2369,13 @@ setDocMetadata[Notebook[cells_, o : OptionsPattern[]], meta_, type_String] := Bl
     Notebook[cells, TaggingRules -> tr, Sequence @@ DeleteCases[opts, _[TaggingRules, _]]]
 ]
 
-(* markdown example-taxonomy sections -> the symbol page's ExampleSection titles *)
+(* markdown example-taxonomy sections -> the symbol page's ExampleSection titles
+   ("Requirements" is NOT an ExampleSection on the Symbol template - it only
+   surfaces on FunctionResource / Paclet via examplesSlot / exampleNotebookSlot,
+   which generate fresh Subsection cells per $exampleOrder entry.) *)
 $extendedTitles = <|
     "scope" -> "Scope",
+    "generalizations & extensions" -> "Generalizations & Extensions",
     "options" -> "Options",
     "applications" -> "Applications",
     "properties and relations" -> "Properties & Relations",
@@ -2406,7 +2407,7 @@ fillExtendedExamples[nb_, sections_] := Block[{content},
     }
 ]
 
-symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"], nb, name, usagePairs, notes, basicText, basicCells, raw},
+symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"], nb, name, usagePairs, notes, basicCells, raw},
     nb = docTemplate["FunctionBaseTemplateExt.nb"];
     name = Lookup[meta, "Name", ""];
     (* one Usage cell for the whole ## Usage section - the palette's Double
@@ -2435,13 +2436,18 @@ symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"]
     If[ KeyExistsQ[meta, "Context"],
         nb = nb /. Cell[_, "ExampleInitialization", o___] :> Cell[BoxData[inputBoxes["Needs[\"" <> meta["Context"] <> "\"]"]], "ExampleInitialization", o]
     ];
-    basicText = rawSectionText[sections, "basic examples"];
-    basicCells = Join[
-        If[basicText === "", {}, {Cell[TextData @ inlineTextData[basicText], "ExampleText"]}],
-        docExampleCells[sections]
-    ];
+    (* walk Basic Examples block-by-block so per-cell `:`-terminated
+       captions become ExampleText cells, `---` thematic breaks become
+       ExampleDelimiter cells (resetting the In[]/Out[] counter), and
+       `### Heading` becomes an ExampleSubsection - the same authoring
+       contract docs/examples.md states for every example section. The
+       extended sections (Scope/Options/...) already go through
+       exampleContent; the Symbol template's Basic Examples slot used to
+       flatten via rawSectionText + docExampleCells, which dropped all
+       of that structure (see issue #3). *)
+    basicCells = exampleContent[Lookup[sections, "basic examples", {}], "ExampleText"];
     (* the base template leaves PrimaryExamplesSection empty for the author;
-       insert the basic example right after its header *)
+       insert the basic examples right after its header *)
     If[ basicCells =!= {},
         nb = nb /. Cell[ph_, "PrimaryExamplesSection", o___] :> Sequence[Cell[ph, "PrimaryExamplesSection", o], Sequence @@ basicCells]
     ];

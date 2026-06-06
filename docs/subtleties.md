@@ -374,6 +374,24 @@ also imports whole markdown documents itself - `Import[file, "Notebook"]` /
 `MarkdownToNotebook` is the richer layer on top (templates, frontmatter metadata,
 cell options, evaluated + cached examples).
 
+### Wolfram's TeX importer silently drops some standard commands
+`ImportString["$\\hbar$", "TeX"]` returns an empty FormBox - the reduced Planck
+constant is one of the LaTeX commands the built-in importer does not know about.
+If a math fragment renders blank or shows a placeholder in the produced notebook,
+grep the source for the LaTeX command and probe it directly with
+`ImportString["$<cmd>$", "TeX"]`; anything that maps to `\[Null]` or the empty
+string is the culprit. Known workarounds:
+
+| LaTeX (drops)       | Use instead | Renders as |
+|---------------------|-------------|------------|
+| `\hbar`             | `\hslash`   | ℏ          |
+
+`MarkdownToNotebook`'s primary path goes through the bundled WolframParser
+LaTeX parser, which **does** know `\hbar` (`-> \[HBar]`); the drop only happens
+when M2N falls back to `ImportString` (WolframParser not loaded, or the math
+fragment contains non-ASCII content the PEGVM path can't parse). The safe
+authoring rule is to prefer the recognisable-by-both name where one exists.
+
 ### Layout comes from frontmatter; the result form is a positional argument
 There is no `"Template"` option and no second function - the document's `Template`
 frontmatter key is the single source of truth for layout, and `MarkdownToNotebook`
