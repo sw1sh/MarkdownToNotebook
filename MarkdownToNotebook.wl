@@ -1566,10 +1566,11 @@ fillSlot[name_, opts_, data_] := Block[{meta = data["meta"]},
         "Examples", examplesSlot[opts, data["sections"]],
         "ExampleNotebook", exampleNotebookSlot[opts, data["sections"]],
         "VerificationTests", testsSlot[opts, data["sections"]],
-        "Author Notes",
-            With[{an = sectionText[data["sections"], "author notes"]},
-                If[an === "", slotDefault[opts], {cleanCell @ ReplacePart[First[slotDefault[opts]], 1 -> an]}]
-            ],
+        (* fillTextDataCells routes the text through inlineTextData so a
+           markdown link, italic, backtick code span, or inline math in the
+           Author Notes section actually renders. The previous bare-string
+           splice left "[label](url)" as literal text in the cell. *)
+        "Author Notes", fillTextDataCells[opts, sectionText[data["sections"], "author notes"]],
         "CompatibilityFeatures",
             If[ KeyExistsQ[meta, "Features"],
                 fillCheckbox["CompatibilityFeatures", asList @ meta["Features"]],
