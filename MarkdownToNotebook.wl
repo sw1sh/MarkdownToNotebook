@@ -504,7 +504,7 @@ resetBoundaryQ[mode_, item_] := Switch[mode,
     _,           MatchQ[item["Type"], "Separator" | "Heading"]
 ]
 
-cumulativeHashes[mode_, items_List] := Block[{acc = "", hashes = {}},
+cumulativeHashes[mode_, items_List] := Module[{acc = "", hashes = {}},
     Scan[
         item |-> (
             If[resetBoundaryQ[mode, item], acc = ""];
@@ -639,7 +639,12 @@ printMd[_] := ""
               "cells" -> {injected cell, ...}|>.
    Failed Get / parse returns "outs" -> {Missing[]} so callers downstream
    still see the failure as a no-output cell rather than a crash. *)
-captureCellRun[code_String, opts_Association : <||>] := Block[{msgFile, prtFile, msgStream, prtStream, stmts, outs, cellsExtra, msgTxt, prtTxt, msgs, prints},
+(* Module - not Block - for the bookkeeping locals so the names cannot
+   collide with anything in the user code we evaluate inside. The
+   inner Block-binds the FOUR symbols that genuinely need dynamic
+   scoping ($Messages, Print, Echo, CellPrint) without exposing the
+   surrounding scratch names. *)
+captureCellRun[code_String, opts_Association : <||>] := Module[{msgFile, prtFile, msgStream, prtStream, stmts, outs, cellsExtra, msgTxt, prtTxt, msgs, prints},
     msgFile = CreateFile[];
     prtFile = CreateFile[];
     msgStream = OpenWrite[msgFile];
@@ -711,14 +716,14 @@ resetState[state_] := If[
     (* pre-definition area: cumulative code chain still resets so cache
        keys don't span the boundary, but we keep every bound symbol. *)
     (ClearSystemCache[]; <|state, "code" -> ""|>),
-    Block[{toRemove = Complement[docContextSymbols[state["ctx"]], state["protected"]]},
+    Module[{toRemove = Complement[docContextSymbols[state["ctx"]], state["protected"]]},
         If[toRemove =!= {}, Quiet @ ClearAll @@ toRemove];
         ClearSystemCache[];
         <|state, "code" -> ""|>
     ]
 ]
 
-evalCell[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], captured},
+evalCell[state_, b_] := Module[{code = state["code"] <> mdSep <> b["Code"], captured},
     (* captureCellRun parses b["Code"] into top-level statements via
        ToExpression[..., Hold] so every statement runs in document order
        and each non-`;`-suppressed value contributes its own Output - matching
@@ -752,7 +757,7 @@ captureProtectedQ[state_, b_] :=
    triggers a reset before its own evaluation. Capture the protected
    baseline before clearing if this boundary marks the transition into
    the first example section. *)
-accumEval[state0_, b_] := Block[{state = state0, s},
+accumEval[state0_, b_] := Module[{state = state0, s},
     If[ captureProtectedQ[state, b],
         state = <|state, "protected" -> docContextSymbols[state["ctx"]]|>
     ];
