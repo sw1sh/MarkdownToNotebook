@@ -363,12 +363,12 @@ MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/r
 
 ### Overview
 
-The `Overview` template fills the doc-tools overview page - the paclet's high-level table of contents that links into its Guide, Symbol, and Tutorial pages. Heading depth picks the cell style (`#` → `TOCDocumentTitle`, `##` → `TOCChapter`, `###` → `TOCSection`, `####` → `TOCSubsection`, `#####` → `TOCSubsubsection`); a bulleted list under a heading becomes TOC leaves one level deeper; each entry's `[Label](paclet:Pub/Pkg/<kind>/Name)` link is rendered as a clickable `ButtonBox`. The worked sample is the [AccessibleColors Overview](https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/AccessibleColors/docs/Tutorials/Overview.md):
+The `Overview` template fills the doc-tools overview page - the paclet's high-level table of contents that links into its Guide, Symbol, and Tutorial pages. Heading depth picks the cell style (`#` → `TOCDocumentTitle`, `##` → `TOCChapter`, `###` → `TOCSection`, `####` → `TOCSubsection`, `#####` → `TOCSubsubsection`); a bulleted list under a heading becomes TOC leaves one level deeper; each entry's `[Label](paclet:Pub/Pkg/<kind>/Name)` link is rendered as a clickable `ButtonBox`. The worked sample is the [AccessibleColors Overview](https://github.com/sw1sh/AccessibleColors/blob/main/docs/Tutorials/Overview.md):
 
 ```wl
 #| screenshot: true
 #| tear: 200
-MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/AccessibleColors/docs/Tutorials/Overview.md"]
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/refs/heads/main/docs/Tutorials/Overview.md"]
 ```
 
 ### Computational Essay
