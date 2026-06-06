@@ -7,11 +7,18 @@ description: Author a Wolfram Language symbol reference page (a function/symbol 
 
 `MarkdownToNotebook` fills the DocumentationTools symbol authoring notebook (which
 `DocumentationBuild` turns into a `ref/` reference page) from a literate-markdown
-document with the `Symbol` template. The worked examples are the symbol pages of
-the AccessibleColors paclet at
-https://github.com/sw1sh/AccessibleColors/tree/main/docs/Symbols ; model new pages
-on them and read https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/doc-pages.md
-for the structure.
+document with the `Symbol` template.
+
+**Before authoring, read
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/doc-pages.md** -
+the *Conventions across all doc pages* section there covers the rules shared
+by Symbol, Guide, and TechNote pages (the `[Symbol]()` / backticks split,
+italics for argument names, `EvaluateSeparator` for state-threading, the
+`<!-- => ... -->` hints are author-only, the build-and-inspect loop, the
+no-`Needs[…]` rule, headless rasterization, ...). The worked examples are
+the symbol pages of the AccessibleColors paclet at
+https://github.com/sw1sh/AccessibleColors/tree/main/docs/Symbols ; model new
+pages on them.
 
 A symbol page documents one symbol and belongs to a paclet (author the paclet with
 the `wolfram-paclet` skill, the guide with `wolfram-guide-page`).

@@ -8,11 +8,18 @@ description: Author a Wolfram Language tech note / tutorial (a free-flowing pros
 `MarkdownToNotebook` fills the DocumentationTools tech-note authoring notebook (which
 `DocumentationBuild` turns into a `tutorial/` page) from a literate-markdown document
 with the `TechNote` template. Unlike a symbol or guide page, a tech note has **no
-fixed sections** - it is free-flowing prose and code, like a tutorial. The worked
-example is the AccessibleColors tutorial at
+fixed sections** - it is free-flowing prose and code, like a tutorial.
+
+**Before authoring, read
+https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/doc-pages.md** -
+the *Conventions across all doc pages* section there covers the rules shared
+by Symbol, Guide, and TechNote pages (the `[Symbol]()` / backticks split,
+italics for argument names, `EvaluateSeparator` for state-threading multi-part
+tutorials, the `<!-- => ... -->` hints are author-only, the build-and-inspect
+loop, the no-`Needs[…]` rule, headless rasterization, ...). The worked example
+is the AccessibleColors tutorial at
 https://github.com/sw1sh/AccessibleColors/blob/main/docs/Tutorials/DesigningAccessibleColorSchemes.md ;
-model new tech notes on it and read
-https://github.com/sw1sh/MarkdownToNotebook/blob/main/docs/doc-pages.md .
+model new tech notes on it.
 
 Read first - the canonical guidelines (a tech note lives inside a paclet, so the
 Paclet Repository rules apply to it):
