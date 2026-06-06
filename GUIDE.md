@@ -3,7 +3,49 @@
 Conventions for Wolfram Language code: `.wl` package files, `.wls`
 scripts, `.wlt` test files, and code in ` ```wl ` markdown cells. The
 rules at the top are non-negotiable; the rest are conventions that keep
-code readable and consistent with the IDE auto-formatter.
+code readable and consistent with the IDE auto-formatter. For the
+markdown documentation sources, see
+[docs/doc-pages.md](docs/doc-pages.md).
+
+## Formatting
+
+This style is produced mechanically by `CodeFormatter`CodeFormat` with a
+set of compact-multiline options. Format a source file with:
+
+```wl
+Needs["CodeFormatter`"]
+
+CodeFormat[Import["Path/To/Source.wl", "Text"],
+    "BreakLinesMethod" -> "LineBreakerV2",
+    "LineWidth" -> 100,
+    "KeepBindingsInline" -> True,
+    "SpaceAfterControlOpener" -> True,
+    "GlueAssignmentRHS" -> True,
+    "TrailingCommas" -> True,
+    "InlineShortControl" -> True,
+    "SpaceAfterPrefixNot" -> True,
+    "SpaceAroundPatternOperators" -> True
+]
+```
+
+`LineBreakerV2` breaks a group all-or-nothing (one element per line, never
+a mid-expression wrap). The options keep a scoping binding list / control
+condition on the opener line when only the body is wide; add the `If[ `
+space; keep an assignment RHS on the operator line (`f := Block[{`); keep
+the comma at the end of a single-line element; leave a short control
+structure inline (`If[a, b, c]`); space a prefix Not (`! cond`); and space
+the pattern operators (`x_ ? NumericQ`). The rest of this guide describes
+the resulting conventions so they can be followed (and reviewed) by hand.
+
+These options are not in the released CodeFormatter; they come from
+[WolframResearch/codeformatter#7](https://github.com/WolframResearch/codeformatter/pull/7).
+A patched build is installed locally as **CodeFormatter 1.14** (with
+CodeParser bumped to 1.14 so the version-match check passes), so a plain
+`Needs["CodeFormatter`"]` picks it up. To reinstall it after a Wolfram
+update, copy the bundled paclet, overlay `Kernel/CodeFormatter.wl` and
+`Kernel/Indent.wl` from that branch, bump `Version` in `PacletInfo.wl`,
+then `CreatePacletArchive` + `PacletInstall` (do the same version bump
+for CodeParser).
 
 ## Rules the user has explicitly called out
 
@@ -346,18 +388,27 @@ a `Do`.
 
 ### Bracket alignment
 
-A closing `]` (or `}`, `|>`, `)`) goes on its own line, indented
-to the same column as the opening head. Never end a multi-line
-form with `...]` on the last expression's line.
+A closing `]` (or `}`, `|>`, `)`) is in exactly one of two places:
+
+1. **On the same line** as its content, when the whole call fits on one
+   line, or
+2. **On its own line**, indented to the column of the **first letter** of
+   the opening head - under the `M` of `Module[`, not under the `[`.
+
+Never end a multi-line form with `...]` dangling on the last expression's
+line, and never put a closing `]` at some other random indent.
 
 ```wolfram
-(* GOOD *)
+(* GOOD: fits, so the ]s close on the same line *)
+res["ExitCode"] =!= 0 && StringLength[res["StandardOutput"]] > 0
+
+(* GOOD: multi-line, each ] under the head's first letter *)
 Module[{x, y, z},
     body1;
     body2
 ]
 
-(* BAD *)
+(* BAD: dangling close on the last expression's line *)
 Module[{x, y, z},
     body1;
     body2]
@@ -365,6 +416,16 @@ Module[{x, y, z},
 
 This makes block boundaries scan-readable and matches what the IDE
 auto-formatter expects.
+
+### No line-length limit
+
+Do not break an expression across lines to satisfy a character budget -
+there is no column limit. A line breaks only for a **structural** reason
+(one statement per line in a `CompoundExpression`, one branch / case per
+line in `If` / `Switch` / `Which`, one binding per line in a long option
+list or `Association`), never merely because the line grew wide. The IDE
+formatter is configured so whole expressions stay on one line and only
+structure introduces newlines.
 
 ## Composition
 
@@ -421,9 +482,14 @@ meaning the inline expression doesn't.
 
 ## Naming
 
-- Public symbols: `CamelCase` (e.g. `TLam`, `THeap`, `TWnf`).
-- Internal helpers: `lowerCamelCase` (e.g. `print`, `loadFn`).
+- Public symbols: `CamelCase` (e.g. `TLam`, `THeap`, `TWnf`, `LeanImport`).
+- Internal helpers: `lowerCamelCase` (e.g. `loadFn`, `parsePath`,
+  `decodeUTF8`).
 - Don't prefix internal helpers with `i...`.
+- For printing during evaluation, use the built-in `Print` directly. A
+  lowercase `print` helper used to be a house convention; we no longer
+  prefer it. Any leftover `print[...]` definition should be removed and
+  its callers switched to `Print`.
 
 ## Tests
 
@@ -449,7 +515,7 @@ When practical, organize a `.wl` file in this order:
 1. Short file comment if needed.
 2. `BeginPackage` declarations and public `::usage` strings.
 3. `Begin["`Private`"]`.
-4. Small general helpers (e.g. `print`).
+4. Small general helpers.
 5. Domain-specific helpers.
 6. Main entry-point definitions near the end.
 7. `End[]; EndPackage[];`
