@@ -333,6 +333,14 @@ feInputText[bd_] := Module[{r},
     r = MathLink`CallFrontEnd[FrontEnd`ExportPacket[Cell[bd, "Input"], "InputText"]];
     StringTrim @ If[MatchQ[r, {_String, ___}], First[r], ToString[r]]
 ]
+(* Strip a wrapping TagBox / InterpretationBox before handing the cell to
+   the FE - InputText preserves these wrappers as their `\!\(\*TagBox[...]\)`
+   linear box form (the FE thinks they're meaningful 2D structure) and
+   surfaces them in the recovered fence as raw box source instead of the
+   code the cell visually renders as. Every other walker (boxToCode,
+   inlineMd, walkerMath) already unwraps these heads (issue #6). *)
+codeText[BoxData[TagBox[b_, ___]]] := codeText[BoxData[b]]
+codeText[BoxData[InterpretationBox[b_, ___]]] := codeText[BoxData[b]]
 codeText[bd : BoxData[b_]] := Module[{r},
     r = Quiet @ Check[feInputText[bd], $Failed];
     If[StringQ[r] && r =!= "", r, boxToCode[b]]
