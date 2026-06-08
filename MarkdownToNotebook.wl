@@ -1517,7 +1517,10 @@ detailsCells[sections_] := Catenate @ Map[
         "MathBlock", {mathBlockCell[block["Text"]]},
         _, {}
     ],
-    Lookup[sections, "details & options", {}]
+    (* sectionKey normalizes " & " to " and ", so the heading
+       "## Details & Options" is stored under "details and options".
+       Look it up via sectionKey to stay robust to the rule (issue #8). *)
+    Lookup[sections, sectionKey["Details & Options"], {}]
 ]
 
 notesSlot[opts_, sections_] := With[{cells = detailsCells[sections]},
@@ -1597,14 +1600,18 @@ exampleDelimiterCell := Cell["\t", "ExampleDelimiter"]
    ExampleDelimiter and restarts the In[]/Out[] counter - never inserted
    automatically. A "### Heading" becomes a subsubsection (an ExampleSubsection on
    doc pages) and likewise restarts the counter. *)
-exampleSubStyle["ExampleText"] = "ExampleSubsection"
-exampleSubStyle[_] = "Subsubsection"
+(* level-aware: a `####` heading inside an example section should become an
+   ExampleSubsubsection, not flatten to the `###` ExampleSubsection style
+   (issue #10). *)
+exampleSubStyle["ExampleText", 4] = "ExampleSubsubsection"
+exampleSubStyle["ExampleText", _] = "ExampleSubsection"
+exampleSubStyle[_, _] = "Subsubsection"
 
 exampleContent[sectionBlocks_, textStyle_String] := Block[{counter = 0, out = {}},
     Do[
         Which[
             block["Type"] === "Heading",
-                AppendTo[out, Cell[TextData @ inlineTextData[block["Text"]], exampleSubStyle[textStyle]]];
+                AppendTo[out, Cell[TextData @ inlineTextData[block["Text"]], exampleSubStyle[textStyle, block["Level"]]]];
                 counter = 0,
             block["Type"] === "Separator",
                 AppendTo[out, exampleDelimiterCell]; counter = 0,
