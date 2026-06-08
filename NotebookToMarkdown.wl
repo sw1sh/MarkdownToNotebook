@@ -346,8 +346,25 @@ codeText[bd : BoxData[b_]] := Module[{r},
     If[StringQ[r] && r =!= "", r, boxToCode[b]]
 ]
 codeText[c : Cell[BoxData[b_], ___]] := codeText[BoxData[b]]
-codeText[s_String] := s
+(* String-content Input cells: re-escape any private-use-area glyph back to
+   its canonical WL form (`\[ImaginaryI]` U+F74E -> `I`, `\[ExponentialE]`
+   -> `E`, named-letter glyphs -> their `\[Name]` escape) so the fenced
+   code block renders in a browser instead of carrying a missing-glyph
+   box. The kernel's ASCII CharacterEncoding does the right thing - and
+   notably keeps `\[ImaginaryI]` as `I` (the imaginary unit), unlike the
+   prose normStr that lowercases it to `i` (issue #7). *)
+codeText[s_String] := puaSafeCode[s]
 codeText[other_] := boxToCode[other]
+
+(* Full Unicode PUA: U+E000 (57344) - U+F8FF (63743). The formal-letter
+   block (\[FormalA]..\[FormalZ], U+F800-U+F833) sits in the upper half,
+   so the bound has to cover it. *)
+puaSafeCode[s_String] := StringJoin @ Map[
+    With[{n = First @ ToCharacterCode[#]},
+        If[57344 <= n <= 63743, ToString[#, CharacterEncoding -> "ASCII"], #]
+    ] &,
+    Characters[s]
+]
 
 (* === per-cell builders === *)
 
