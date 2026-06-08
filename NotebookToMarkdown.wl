@@ -38,10 +38,19 @@ decorationCellQ[_] := False
    preserves formatting choices. *)
 inlineMd[s_String] := s
 inlineMd[c_Cell] /; decorationCellQ[c] := ""
+(* wrap a markdown run in italic (*) / bold (**) markers, but NOT when it is
+   punctuation / bracket only (italicizing "]" gives a stray "*]*"), and NOT when it is
+   already wrapped at the same level (StyleBox[StyleBox[x,"TI"],FontSlant->Italic] must
+   give *x*, not **x**). This keeps overlapping/malformed markers out of the output. *)
+emWrap[s_String, mark_String] := Which[
+    s === "" || StringMatchQ[s, (PunctuationCharacter | WhitespaceCharacter | "[" | "]" | "{" | "}" | "(" | ")") ..], s,
+    StringMatchQ[s, mark ~~ Except["*"] .. ~~ mark], s,
+    True, mark <> s <> mark
+]
 inlineMd[StyleBox[s_, opts___]] := With[{styles = {opts}, inner = inlineMd[s]},
     Which[
-        MemberQ[styles, "TI"] || MemberQ[styles, FontSlant -> "Italic"], "*" <> inner <> "*",
-        MemberQ[styles, "TB"] || MemberQ[styles, FontWeight -> "Bold"], "**" <> inner <> "**",
+        MemberQ[styles, "TI"] || MemberQ[styles, FontSlant -> "Italic"], emWrap[inner, "*"],
+        MemberQ[styles, "TB"] || MemberQ[styles, FontWeight -> "Bold"], emWrap[inner, "**"],
         True, inner
     ]
 ]
@@ -206,7 +215,7 @@ inlineMd[StyleBox[s_, "Code", ___]] := "`" <> boxToCode[s] <> "`"
    the subscript falls through to boxToCode and leaks "Subscript[obj, i]". *)
 inlineMd[StyleBox[SubscriptBox[a_, b_], "TI", ___]] := "$" <> walkerMath[a] <> "_{" <> walkerMath[b] <> "}$"
 inlineMd[StyleBox[SuperscriptBox[a_, b_], "TI", ___]] := "$" <> walkerMath[a] <> "^{" <> walkerMath[b] <> "}$"
-inlineMd[StyleBox[s_, "TI", ___]] := "*" <> inlineMd[s] <> "*"
+inlineMd[StyleBox[s_, "TI", ___]] := emWrap[inlineMd[s], "*"]
 
 (* The front end's inline-box escape for a styled placeholder string parses, on Get, to
    DisplayForm[StyleBox[x, TI]] inside the string; convert that to the *x* italic form.
@@ -238,6 +247,11 @@ normCharCode[n_Integer] := Which[
     63206 <= n <= 63231, FromCharacterCode[n - 63206 + 97],   (* double-struck a..z *)
     63396 <= n <= 63421, FromCharacterCode[n - 63396 + 65],   (* double-struck A..Z *)
     63451 <= n <= 63460, FromCharacterCode[n - 63451 + 48],   (* double-struck 0..9 *)
+    (* Named math constants \[CapitalDifferentialD] \[DifferentialD] \[ExponentialE]
+       \[ImaginaryI] \[ImaginaryJ] live in the same PUA band as the FE markers but are
+       CONTENT (the e in e^{i...}, the i in an exponent). Map to plain ASCII so they are
+       not swallowed by the drop below, which would orphan a SuperscriptBox into ^{...}. *)
+    63307 <= n <= 63311, FromCharacterCode @ {68, 100, 101, 105, 106}[[n - 63306]],
     57344 <= n <= 63487, "",                                   (* FE structural box markers -> drop *)
     True, FromCharacterCode[n]
 ]
@@ -248,13 +262,16 @@ stripStructPUA[s_String] := StringJoin @ DeleteCases[Characters[s],
 (* cleanStr: for an inline STRING, rewrite any serialized box-syntax a placeholder may
    carry (StyleBox["x","TI"] -> *x*, SubscriptBox -> $_{}$) then normalize characters.
    Strip the FE \!\(\* wrapper first so the box heads are matchable. *)
+(* mathDq: dq, then canonicalize Greek to TeX commands - for the $..$ math segments only,
+   so a serialized SubscriptBox[\[Gamma], 1] string yields $\gamma_{1}$, not a raw $γ_{1}$. *)
+mathDq[x_String] := StringReplace[dq[x], Normal @ $mathTeX]
 cleanStr[s_String] := normStr @ StringReplace[stripStructPUA[s], {
     "StyleBox[\"" ~~ Shortest[v__] ~~ "\", \"TI\"]" :> "*" <> v <> "*",
     "DisplayForm[StyleBox[" ~~ Shortest[v__] ~~ ", TI]]" :> "*" <> v <> "*",
     "StyleBox[" ~~ Shortest[v__] ~~ ", TI]" :> "*" <> v <> "*",
-    "SubsuperscriptBox[" ~~ Shortest[a__] ~~ ", " ~~ Shortest[b__] ~~ ", " ~~ Shortest[c__] ~~ "]" :> "$" <> dq[a] <> "_{" <> dq[b] <> "}^{" <> dq[c] <> "}$",
-    "SubscriptBox[" ~~ Shortest[a__] ~~ ", " ~~ Shortest[b__] ~~ "]" :> "$" <> dq[a] <> "_{" <> dq[b] <> "}$",
-    "SuperscriptBox[" ~~ Shortest[a__] ~~ ", " ~~ Shortest[b__] ~~ "]" :> "$" <> dq[a] <> "^{" <> dq[b] <> "}$"
+    "SubsuperscriptBox[" ~~ Shortest[a__] ~~ ", " ~~ Shortest[b__] ~~ ", " ~~ Shortest[c__] ~~ "]" :> "$" <> mathDq[a] <> "_{" <> mathDq[b] <> "}^{" <> mathDq[c] <> "}$",
+    "SubscriptBox[" ~~ Shortest[a__] ~~ ", " ~~ Shortest[b__] ~~ "]" :> "$" <> mathDq[a] <> "_{" <> mathDq[b] <> "}$",
+    "SuperscriptBox[" ~~ Shortest[a__] ~~ ", " ~~ Shortest[b__] ~~ "]" :> "$" <> mathDq[a] <> "^{" <> mathDq[b] <> "}$"
 }]
 
 (* route all inline caption strings through the cleaner; plain prose passes unchanged *)
@@ -278,7 +295,7 @@ boxToCode[s_String] := normStr[s]
    - operators / brackets / commas / arrows -> literal (formal chars mapped, PUA dropped) *)
 sig[s_String] := cleanStr[s]
 sig[bb_ButtonBox] := "[" <> cellPlain[bb[[1]]] <> "]()"
-sig[StyleBox[s_String, "TI", ___]] := "*" <> normStr[s] <> "*"
+sig[StyleBox[s_String, "TI", ___]] := emWrap[normStr[s], "*"]
 sig[StyleBox[s_, ___]] := sig[s]
 sig[SubscriptBox[a_, b_]] := "$" <> sigSub[a] <> "_{" <> sigSub[b] <> "}$"
 sig[SuperscriptBox[a_, b_]] := "$" <> sigSub[a] <> "^{" <> sigSub[b] <> "}$"
@@ -295,7 +312,9 @@ sig[f_Symbol] := SymbolName[f]
 sig[other_] := normStr @ boxToCode[other]
 (* subscript/superscript content: strip styling, keep the plain text for the $...$ *)
 sigSub[StyleBox[s_, ___]] := sigSub[s]
-sigSub[s_String] := normStr[s]
+(* sig subscripts/superscripts are emitted inside $..$, so canonicalize Greek to TeX
+   commands here too (matches the walkerMath math leaf); ASCII bases are unaffected. *)
+sigSub[s_String] := StringReplace[normStr[s], Normal @ $mathTeX]
 sigSub[RowBox[xs_List]] := StringJoin[sigSub /@ xs]
 sigSub[x_] := walkerMath[x]
 sigBox[x_] := sig[x]
@@ -310,7 +329,12 @@ mathyQ[b_] := ! FreeQ[b, _SubscriptBox | _SuperscriptBox | _SubsuperscriptBox |
    heavy-math boxes so a functional-form formula (e.g. Tr[Sqrt[...]]) stays $...$. *)
 sigCallBoxQ[RowBox[{h_, "[", ___}] ? (FreeQ[#, SqrtBox | FractionBox | RadicalBox | UnderoverscriptBox] &)] :=
     MatchQ[h, _Symbol | _String | StyleBox[_, "TI", ___]]
+(* a code signature is sometimes authored inside a TraditionalForm FormBox (math); unwrap
+   it so it routes to <code>. In math mode its literal {} / [] would otherwise become
+   invisible TeX grouping (braces vanish) and the code renders in italic. *)
+sigCallBoxQ[FormBox[b_, ___]] := sigCallBoxQ[b]
 sigCallBoxQ[_] := False
+sig[FormBox[b_, ___]] := sig[b]
 
 (* a FormBox is math by definition: never serialize it as code *)
 boxToCode[FormBox[b_, ___]] := walkerMath[b]
@@ -334,8 +358,38 @@ walkerMath[StyleBox[s_, ___]] := walkerMath[s]
 walkerMath[Cell[BoxData[b_], ___]] := walkerMath[b]
 walkerMath[Cell[c_, ___]] := walkerMath[c]
 
-(* math leaf strings: map formal symbols, strip FE PUA *)
-walkerMath[s_String] := normStr[s]
+(* math leaf strings: map formal symbols, strip FE PUA.
+   In TeX/KaTeX math, literal spaces are IGNORED and a multi-letter token like "mod"
+   renders as a product of italics, so "(a+b) mod n" collapses to "(a+b)modn". Map the
+   common text operators to their TeX operators and a run of spaces to a thin space so
+   the spacing survives. *)
+walkerMath["mod"] := "\\bmod "
+walkerMath["div"] := "\\div "
+walkerMath["gcd"] := "\\gcd "
+walkerMath["lcm"] := "\\operatorname{lcm} "
+walkerMath[s_String /; s =!= "" && StringMatchQ[s, Whitespace]] := "\\, "
+(* In math mode a raw Unicode Greek glyph or math operator is non-canonical TeX; map to
+   the command. Applied ONLY on the math leaf (walkerMath / sigSub / mathDq), never in
+   normStr, so the same glyph in prose is left as the readable Unicode character. *)
+$mathTeX = <|
+    "\[Alpha]" -> "\\alpha ", "\[Beta]" -> "\\beta ", "\[Gamma]" -> "\\gamma ",
+    "\[Delta]" -> "\\delta ", "\[Epsilon]" -> "\\epsilon ", "\[CurlyEpsilon]" -> "\\varepsilon ",
+    "\[Zeta]" -> "\\zeta ", "\[Eta]" -> "\\eta ", "\[Theta]" -> "\\theta ",
+    "\[CurlyTheta]" -> "\\vartheta ", "\[Iota]" -> "\\iota ", "\[Kappa]" -> "\\kappa ",
+    "\[Lambda]" -> "\\lambda ", "\[Mu]" -> "\\mu ", "\[Nu]" -> "\\nu ", "\[Xi]" -> "\\xi ",
+    "\[Pi]" -> "\\pi ", "\[Rho]" -> "\\rho ", "\[Sigma]" -> "\\sigma ", "\[FinalSigma]" -> "\\varsigma ",
+    "\[Tau]" -> "\\tau ", "\[Upsilon]" -> "\\upsilon ", "\[Phi]" -> "\\phi ",
+    "\[CurlyPhi]" -> "\\varphi ", "\[Chi]" -> "\\chi ", "\[Psi]" -> "\\psi ", "\[Omega]" -> "\\omega ",
+    "\[CapitalGamma]" -> "\\Gamma ", "\[CapitalDelta]" -> "\\Delta ", "\[CapitalTheta]" -> "\\Theta ",
+    "\[CapitalLambda]" -> "\\Lambda ", "\[CapitalXi]" -> "\\Xi ", "\[CapitalPi]" -> "\\Pi ",
+    "\[CapitalSigma]" -> "\\Sigma ", "\[CapitalUpsilon]" -> "\\Upsilon ", "\[CapitalPhi]" -> "\\Phi ",
+    "\[CapitalPsi]" -> "\\Psi ", "\[CapitalOmega]" -> "\\Omega ",
+    (* math operators / letterlike symbols *)
+    "\[Dagger]" -> "\\dagger ", "\[CircleTimes]" -> "\\otimes ", "\[Ellipsis]" -> "\\ldots ",
+    "\[Sum]" -> "\\sum ", "\[ScriptCapitalL]" -> "\\mathcal{L}", "\[PartialD]" -> "\\partial ",
+    "\[Times]" -> "\\times ", "\[CenterDot]" -> "\\cdot "
+|>;
+walkerMath[s_String] := StringReplace[normStr[s], Normal @ $mathTeX]
 
 (* robust link: a ButtonBox's first argument is its label (String / StyleBox / RowBox);
    emit the inferred-link form [label](). Always produces a link, never a raw dump. *)
@@ -361,7 +415,7 @@ inlineMd[c0 : Cell[BoxData[b_], "InlineFormula", ___]] /; ! decorationCellQ[c0] 
         If[StringContainsQ[c, "*"], c, "`" <> c <> "`"]]
 ]
 inlineMd[c0 : Cell[BoxData[b_], ___]] /; ! decorationCellQ[c0] :=
-    Which[MatchQ[b, _Cell], inlineMd[b], mathyQ[b], "$" <> walkerMath[b] <> "$", True, "`" <> boxToCode[b] <> "`"]
+    Which[MatchQ[b, _Cell], inlineMd[b], sigCallBoxQ[b], "<code>" <> sigBox[b] <> "</code>", mathyQ[b], "$" <> walkerMath[b] <> "$", True, "`" <> boxToCode[b] <> "`"]
 inlineMd[BoxData[b_]] := If[mathyQ[b], "$" <> walkerMath[b] <> "$", "`" <> boxToCode[b] <> "`"]
 inlineMd[TagBox[x_, ___]] := inlineMd[x]
 inlineMd[InterpretationBox[x_, ___]] := inlineMd[x]
@@ -394,15 +448,21 @@ feInput[bd_] := Module[{r},
 (* --- clean caption whitespace (newlines -> space, collapse) --- *)
 tidy[s_String] := StringTrim @ StringReplace[s, {"\n" -> " ", "\r" -> " ", Whitespace -> " "}]
 
-(* --- Usage cell: split the TextData on ModInfo separators into one paragraph per
-   signature, each "<code>sig</code> description." --- *)
-usageMd[TextData[xs_List]] := Module[{groups},
-    groups = Split[DeleteCases[xs, Cell[_, "ModInfo", ___]],
-        (* keep grouping simple: a new ModInfo started a new line, but we removed them,
-           so re-split on a leading-"\n" description following a signature is unreliable;
-           instead split before each InlineFormula that holds a Link button (a signature). *)
-        True &];
-    usageLines[DeleteCases[xs, Cell[_, "ModInfo", ___]]]
+(* --- Usage cell: split the TextData on its ModInfo separators - the doc template's
+   actual statement boundaries - into one paragraph per usage statement. Splitting on
+   ModInfo (not on every signature-like element) keeps an inline symbol reference inside
+   a description, e.g. "...changes the basis of the QuantumOperator qo...", from being
+   mistaken for a new statement and breaking the paragraph. --- *)
+usageMd[TextData[xs_List]] := Module[{lines = {}, cur = {}},
+    Do[
+        If[ MatchQ[e, Cell[_, "ModInfo", ___]],
+            If[cur =!= {}, AppendTo[lines, cur]]; cur = {},
+            AppendTo[cur, e]
+        ],
+        {e, xs}
+    ];
+    If[cur =!= {}, AppendTo[lines, cur]];
+    StringRiffle[tidy[StringJoin[inlineMd /@ #]] & /@ DeleteCases[lines, {}], "\n\n"]
 ]
 usageMd[other_] := tidy @ inlineMd[other]
 
@@ -459,6 +519,17 @@ spacerQ[Cell[s_String, "ModInfo", ___]] := StringMatchQ[s, Whitespace | ""]
 spacerQ[_] := False
 gridCellMd[s_String] := "`" <> StringTrim[s] <> "`"
 gridCellMd[Cell[t_, "TableText", ___]] := tidy @ inlineMd[t]
+(* A left-column "spec" call-form (`"Graph"[g]`, `qco["Diagram"]`) is the literal thing
+   you type, exactly like a bare-string spec - render it as inline code so the spec column
+   is uniform (bare strings already backtick via the s_String rule). BUT a code span cannot
+   hold a 2D subscript: backticking `"Multiplexer"[op_1,..]` would linearize op_1 to the
+   literal text `Subscript[op, 1]` (ugly, and round-trips to literal text, not the box).
+   So backtick only when the spec is sub/superscript-free; otherwise render it as a
+   signature with canonical $op_{1}$ math (proper subscript, round-trips to the SubscriptBox,
+   matching how Usage signatures present subscript args). *)
+gridCellMd[b_ /; sigCallBoxQ[b] && FreeQ[b, SubscriptBox | SuperscriptBox | SubsuperscriptBox]] :=
+    "`" <> boxToCode[b] <> "`"
+gridCellMd[b_ /; sigCallBoxQ[b]] := tidy @ sig[b]
 gridCellMd[c_] := tidy @ inlineMd[c]
 gridTable[rows_List] := Module[{drows, ncol},
     drows = Function[r, gridCellMd /@ DeleteCases[r, _?spacerQ]] /@ rows;

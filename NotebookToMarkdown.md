@@ -39,6 +39,7 @@ inline:
 - Inline `TextData` is converted back through the same backtick / bold / italic / link rules the forward parser accepts, so the produced markdown re-parses to an equivalent block sequence.
 - The walker does not recover frontmatter or resource-template-specific slots from the rendered cells; the markdown it emits is the rendered body only.
 - **`"DocPage" -> True`** switches to the *faithful doc-page* path, the reverse of MarkdownToNotebook's `Symbol` / `Guide` / `TechNote` authoring (see `docs/doc-pages.md`). Unlike the general walker it recovers: the **frontmatter** (from the `Categorization` / `Keywords` / `SeeAlso` / `MoreAbout` cells); the **verbatim typed Input code** via the front end's `InputText` export (preserving subscripts, `@`, `//`, `[[…]]`, `%`); **Usage signatures** as <code>[Sym]()[…]</code> spans; and the `Notes` / `2ColumnTableMod` / `3ColumnTableMod` cells as a `## Details & Options` section with pipe tables. It **requires a front end** (for `InputText`); the public entry wraps the call in [UsingFrontEnd]().
+- **Table spec column rendering.** In the `2ColumnTableMod` / `3ColumnTableMod` tables, the left column is the literal thing you pass to the symbol. A bare-string spec (`"Bell"`) and a *subscript-free* call-form spec (`"Graph"[g]`, `qco["Diagram"]`) are both backticked as inline code, so the simple rows are uniform instead of a code-styled pill next to plain text. A spec that carries a 2D subscript (`"Multiplexer"[op_1,…]`, `"Liouvillian"[H,{L_1,…},{γ_1,…}]`) can't live in a code span, so it is rendered as a signature with canonical `$op_{1}$` math: a real typeset subscript that round-trips back to the `SubscriptBox`, rather than the linearized literal `Subscript[op, 1]` that backticking would produce.
 - **Round-trip contract for signatures.** Subscripted arguments are emitted as canonical inline math with the base *inside* the math, `$obj_{i}$` — the form MarkdownToNotebook's `mathArgsToTemplate` round-trips to a clean subscript. The looser `*obj*$_i$` form (italic base + a separate `$_i$`) renders fine as raw markdown but round-trips *broken* (the forward parser only templates `$base_sub$` / `base~sub~` / `base<sub>sub</sub>`), so the doc-page path never emits it.
 - **Three nb→md tools, three jobs.** Use the `nb-reader` skill's Python converter for quick *reading / comprehension* of any notebook (no kernel); the plain `NotebookToMarkdown[nb]` walker for an *approximate* body of an arbitrary notebook; and `NotebookToMarkdown[nb, "DocPage" -> True]` for a *faithful, rebuildable* twin of a shipped reference page. Only the last is round-trip-faithful for doc pages.
 - Empty template sections (a placeholder `## Properties & Relations` with no content) are dropped, matching MarkdownToNotebook, which drops empty sections on build.
@@ -81,6 +82,29 @@ Round-trip is *approximate*. The walker reads the rendered cells, not the origin
 
 For an arbitrary notebook the walker emits its best guess at the prose / heading / code structure; for a notebook MarkdownToNotebook itself wrote, the body is close to the source but the frontmatter must be added back by hand if needed.
 
+### Doc-page mode (`"DocPage" -> True`): verify the output, and known failure classes
+
+The faithful doc-page path renders far more than the general walker (frontmatter, verbatim code, signatures, tables), and a shipped reference page can carry box shapes that misrender silently. **Verify the generated `.md` source byte-by-byte** — do not trust a rendered preview (it caches, and these failures are invisible until they break KaTeX or dump raw boxes). Check all of:
+
+- **code-cell count** — ` ```wl ` fences equal the nb's `Input`/`Code` cell count (mismatch ⇒ a dropped/truncated section);
+- **section list** — the `##`/`###` headings match the nb's `ExampleSection`/`Subsection` list and order;
+- **0 PUA glyphs** in the file (`0xE000–0xF8FF`) — a leftover is a dropped Wolfram glyph (script/gothic/double-struck letter);
+- **0 orphan subscripts** — no `$…_{…}…$` with no base (`|_{+}_{+}\rangle` ⇒ KaTeX "double subscript");
+- **0 prose box-leaks** — none of `StyleBox[`, `Cell[TextData`, `Cell[BoxData`, `RowBox[`, `GridBox[`, `Subscript[`, `\!\(` outside ` ``` ` fences;
+- **0 malformed emphasis** — no `***`, `*]*`, `**}`;
+- **round-trip** — `MarkdownToNotebook` on the result builds with no `Message` cells and clean subscripts.
+
+Failure classes the converter now handles (recognize them in new pages):
+
+- a **code signature authored inside a TraditionalForm `FormBox`** routes to `$…$` math, where literal `{}`/`[]` are invisible TeX grouping (braces vanish) and code shows italic → must be `<code>`;
+- **deeply nested table cells** (`Cell[BoxData[Cell[TextData[…],"TableText"]]]`) → a `ToString` dump of the raw `Cell[…]`;
+- **script/gothic letter glyphs** (`\[ScriptX]`, …) sit in the FE structural-PUA band → if dropped, a subscript base vanishes;
+- **named math constants** (`\[ExponentialE]`, `\[ImaginaryI]`, `\[ImaginaryJ]`, `\[DifferentialD]`, `\[CapitalDifferentialD]`) also sit in that PUA band → if dropped, `e^{i 2 π λ}` collapses to an orphan `$^{2 π λ}$` (base `e` and exponent `i` deleted); they map to `e i j d D`;
+- **Unicode Greek in math** (`\[Pi]`→`π`) is non-canonical TeX → the math leaf rewrites Greek glyphs to commands (`\pi`, `\lambda`, …) only inside `$…$`, never in prose;
+- the **`*base*$_i$` subscript form** (italic base + separate `$_i$`) round-trips **broken** — only `$base_{i}$` re-templates;
+- **Usage over-split** — split on the cell's `ModInfo` separators, not on every signature-like element (an inline symbol link in a description must not start a new statement);
+- **TraditionalForm math fidelity is inherently lossy** — implicit-multiplication spacing (`2 ω`→`2ω`) and multi-letter functions (`Cos`→italic letters) don't survive box→TeX; target "readable & correct", not pixel-identical.
+
 ## Neat Examples
 
 A round-trip smoke test: forward, walk, forward again, and check the second forward run produces a notebook with the same set of cell styles in the same order as the first - confirming the walker emits a faithful structural reduction even when byte-exact recovery is not possible:
@@ -103,7 +127,7 @@ With[{md = "# Demo\n\n## Section\n\nA paragraph.\n\n```wl\nRange[5]^2\n```\n"},
 
 Each `wl` cell in this section is an explicit `VerificationTest[code, expected, TestID -> …]` expression that becomes one Input cell in the resource's `VerificationTests` slot (the docked *Run Tests* button evaluates them). The repo's `tests.wls` scrapes this section and runs the same assertions out-of-band, so the in-notebook button and the CI script share a single source of truth.
 
-An `InlineFormula` cell wrapping a `FormBox` is emitted as `$math$`, not as a backticked code span - so a Greek letter in inline math round-trips with its `$…$` delimiters (regression: the previous handler wrapped every `InlineFormula` content in backticks, so the recovered math came out as ``` `$θ$` ``` with extra delimiters):
+An `InlineFormula` cell wrapping a `FormBox` is emitted as `$math$`, not as a backticked code span, and in math mode a Wolfram Greek glyph becomes its canonical TeX command (`\[Theta]` -> `\theta`, not a raw Unicode `θ`) so the output is valid TeX rather than a literal codepoint (regression: the previous handler both wrapped every `InlineFormula` content in backticks, giving ``` `$θ$` ``` with extra delimiters, and left the Greek letter as Unicode):
 
 ```wl
 VerificationTest[
@@ -111,10 +135,41 @@ VerificationTest[
         NotebookToMarkdown @ Notebook[{
             Cell[TextData[{"angle ", Cell[BoxData[FormBox["\[Theta]", TraditionalForm]], "InlineFormula"]}], "Text"]
         }],
-        "$\[Theta]$"
+        "$\\theta"
     ],
     True,
     TestID -> "InlineFormula+FormBox -> $math$ (no backticks)"
+]
+```
+
+The named math constants `\[ExponentialE]`, `\[ImaginaryI]`, `\[ImaginaryJ]`, `\[DifferentialD]`, `\[CapitalDifferentialD]` occupy the same private-use band as the FE structural markers the converter drops, but they are content. They map to plain ASCII (`e`, `i`, `j`, `d`, `D`) before that drop, so a `SuperscriptBox["\[ExponentialE]", …]` keeps its base instead of collapsing to an orphan `$^{…}$` (regression: `e^{i 2 π λ}` rendered as a bare superscript `^{2 π λ}` with the base `e` and exponent `i` silently deleted):
+
+```wl
+VerificationTest[
+    With[{md = NotebookToMarkdown @ Notebook[{
+        Cell[TextData[{"in the form ", Cell[BoxData[
+            SuperscriptBox["\[ExponentialE]", RowBox[{"\[ImaginaryI]", " ", "2", "\[Pi]", " ", "\[Lambda]"}]]],
+            "InlineFormula"]}], "Text"]
+    }]},
+        StringContainsQ[md, "$e^{i"] && StringContainsQ[md, "\\pi"] &&
+            StringContainsQ[md, "\\lambda"] && ! StringContainsQ[md, "$^{"]
+    ],
+    True,
+    TestID -> "math constants \[ExponentialE]/\[ImaginaryI] survive in a SuperscriptBox"
+]
+```
+
+The left "spec" column of a doc table is the literal thing you type, so a subscript-free call-form (`"Graph"[g]`) renders as inline code just like a bare-string entry (`"Bell"`) - no mix of code-styled pill and plain text. A code span cannot hold a 2D subscript, though: a subscript-bearing spec (`"Multiplexer"[op_1,op_2,…]`) is rendered as a signature with canonical `$op_{1}$` math instead, which shows a real subscript and round-trips back to the `SubscriptBox` (backticking it would linearize `op_1` to the literal text `Subscript[op, 1]`):
+
+```wl
+VerificationTest[
+    {
+        gridCellMd["\"Bell\""],
+        gridCellMd[RowBox[{"\"Graph\"", "[", StyleBox["g", "TI"], "]"}]],
+        gridCellMd[RowBox[{"\"Mux\"", "[", SubscriptBox[StyleBox["op", "TI"], "1"], "]"}]]
+    },
+    {"`\"Bell\"`", "`\"Graph\"[g]`", "\"Mux\"[$op_{1}$]"},
+    TestID -> "table spec column: simple specs inline-code, subscript specs canonical $math$"
 ]
 ```
 
@@ -142,5 +197,48 @@ VerificationTest[
     }],
     "## Caption",
     TestID -> "drops MoreInfoOpener-shaped decoration cells from heading TextData"
+]
+```
+
+A code signature authored inside a TraditionalForm `FormBox` renders as a `<code>` span, not `$math$` - in math mode its literal `{}`/`[]` would be invisible TeX grouping (braces vanish) and the code would show italic (regression: a `QuantumEvolve[H,{L1,...},...]` signature wrapped in a FormBox lost its list braces and rendered as big italic math):
+
+```wl
+VerificationTest[
+    With[{md = NotebookToMarkdown @ Notebook[{
+        Cell[TextData[{"have ", Cell[BoxData[FormBox[RowBox[{"Foo", "[", RowBox[{"a", ",", "b"}], "]"}], TraditionalForm]]], " only"}], "Text"]
+    }]},
+        StringContainsQ[md, "<code>"] && ! StringContainsQ[md, "$Foo"]
+    ],
+    True,
+    TestID -> "a code signature in a FormBox renders as <code>, not $math$"
+]
+```
+
+A `Cell` nested several levels deep inside `BoxData` (a doc table cell can wrap its prose `Cell[BoxData[Cell[TextData[…],"TableText"]]]`) is recursed into, not `ToString`-dumped as a raw `Cell[…]` (regression: the BoxData handler sent the inner cell to `boxToCode`, leaking the whole `Cell[TextData[…]]` expression into the table):
+
+```wl
+VerificationTest[
+    ! StringContainsQ[
+        NotebookToMarkdown @ Notebook[{
+            Cell[TextData[{Cell[BoxData[Cell[TextData[{"plain ", Cell[BoxData[StyleBox["x", "TI"]], "InlineFormula"]}], "TableText"]]]}], "Text"]
+        }],
+        "Cell["
+    ],
+    True,
+    TestID -> "a Cell nested inside BoxData is unwrapped, not dumped as Cell[...]"
+]
+```
+
+Nested italic styling does not double-wrap to bold and a styled bracket is not italicized - `StyleBox[StyleBox[x,"TI"],FontSlant->Italic]` gives `*x*` (not `**x**`) and `StyleBox["]",FontSlant->Italic]` gives `]` (not `*]*`), so a signature like `"GlobalPhase"[θ]` stays clean instead of `"GlobalPhase"[**θ***]*` (regression: naive StyleBox handling produced overlapping markdown markers):
+
+```wl
+VerificationTest[
+    With[{md = NotebookToMarkdown @ Notebook[{
+        Cell[TextData[{Cell[BoxData[RowBox[{StyleBox[StyleBox["x", "TI"], FontSlant -> "Italic"], StyleBox["]", FontSlant -> "Italic"]}]], "InlineFormula"]}], "Text"]
+    }]},
+        ! StringContainsQ[md, "***"] && ! StringContainsQ[md, "*]*"]
+    ],
+    True,
+    TestID -> "nested italic does not double-wrap and brackets are not italicized"
 ]
 ```
