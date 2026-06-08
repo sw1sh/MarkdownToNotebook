@@ -590,11 +590,19 @@ markdownOfNb[nb : Notebook[_List, ___]] := Block[{name, blocks, fm, $detailsHead
     fm <> StringRiffle[blocks, "\n\n"] <> "\n"
 ]
 
-(* === public entry === *)
-NotebookToMarkdown[nb : Notebook[_List, ___]] := UsingFrontEnd @ markdownOfNb[nb]
-NotebookToMarkdown[nbo_NotebookObject] := UsingFrontEnd @ markdownOfNb[NotebookGet[nbo]]
+(* === public entry ===
+   Wrapping each entry in UsingFrontEnd would be friendlier for headless
+   callers (the FE link feInput needs gets spawned automatically), but it
+   trips the Function Repository scrape - the scraper inspects the
+   EntrySymbol's right-hand side and stumbles when the outermost head is
+   `UsingFrontEnd` rather than the function's own code. Keep the public
+   entries plain; the feInput call site itself catches a missing FE and
+   falls back to boxToCode, so a no-FE session degrades gracefully without
+   needing the wrap here. *)
+NotebookToMarkdown[nb : Notebook[_List, ___]] := markdownOfNb[nb]
+NotebookToMarkdown[nbo_NotebookObject] := markdownOfNb[NotebookGet[nbo]]
 NotebookToMarkdown[file_String /; FileExistsQ[file] && StringEndsQ[ToLowerCase[file], ".nb"]] :=
-    UsingFrontEnd @ markdownOfNb[Get[file]]
+    markdownOfNb[Get[file]]
 NotebookToMarkdown[source_, "String"] := NotebookToMarkdown[source]
 NotebookToMarkdown[source_, target_String /; StringEndsQ[ToLowerCase[target], ".md"]] := Block[
     {md = NotebookToMarkdown[source]},

@@ -80,7 +80,12 @@ buildOne[mdName_String, entrySymbol_Symbol, cloudPath_String] := Block[
             CurrentValue[nbo, CreateCellID] = True;
             SelectionMove[nbo, All, Notebook];
             FrontEndTokenExecute[nbo, "Save"];
-            ro = ResourceObject[nbo];
+            (* Quiet swallows ExpandFileName::badfile that the framework's
+               fastPathHash cache fires when an Example notebook reference
+               resolves to None during scraping. The message looks fatal
+               but isn't; with it surfaced, the whole ResourceObject call
+               returns $Failed and the deploy aborts. *)
+            ro = Quiet @ ResourceObject[nbo];
             rf = ResourceFunction[ro];
             NotebookClose[nbo];
             CloudDeploy[rf, CloudObject[cloudPath], Permissions -> "Public"]
