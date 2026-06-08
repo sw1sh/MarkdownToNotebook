@@ -37,6 +37,19 @@ The implementation is a single plain `.wl` file, inlined here at conversion time
 
 Needs["GeneralUtilities`"]
 
+If[ PacletFind["Wolfram/Parser"] === {},
+    If[ DirectoryQ["examples/WolframParser"],
+        PacletDirectoryLoad["examples/WolframParser"],
+        If[ FailureQ[PacletInstall["Wolfram/Parser"]],
+            PacletInstall[ResourceObject["https://wolfr.am/1ECIxdqhB"]]
+        ]
+    ]
+]
+(* Best-effort: if no parser is reachable, MTN still loads and the math path
+   falls back to ImportString (see wolframParserTeX, which gates on the symbol
+   existing at call time rather than on this load succeeding). *)
+Quiet @ Check[Needs["Wolfram`Parser`"], Null]
+
 mdSep = "\n(*--cell--*)\n"
 
 (* === frontmatter === *)
@@ -94,6 +107,8 @@ extractFrontmatter[text_String] := Block[{lines, close},
 (* === block parsing === *)
 
 fenceQ[line_String] := StringMatchQ[StringTrim[line], "```" ~~ ___]
+fenceLen[line_String] := StringLength @ FirstCase[
+    StringCases[StringTrim[line], StartOfString ~~ f : ("`" ..) :> f], _String, ""]
 
 headingQ[line_String] := StringMatchQ[line, ("#" ..) ~~ " " ~~ ___]
 
@@ -129,16 +144,50 @@ codeBlock[info_String, bodyLines_List] := Block[{optLines, codeLines},
     |>
 ]
 
-fenceSplit[{}, collected_] := {Reverse[collected], {}}
-fenceSplit[lines_List, collected_] := If[ fenceQ[First[lines]],
-    {Reverse[collected], Rest[lines]},
-    fenceSplit[Rest[lines], Prepend[collected, First[lines]]]
+(* fenceSplit[lines, openLen]: gather lines until a CLOSE fence whose own
+   backtick run is at least openLen long. A shorter fence inside a longer one
+   is content, not a closer (CommonMark semantics). Iterative so we don't
+   trip $IterationLimit on a very long inlined-file cell (a `#| file:`
+   include of, say, 5000 lines). *)
+fenceSplit[lines_List, openLen_Integer] := Module[{n = Length[lines], i = 1},
+    While[i <= n && ! (fenceQ[lines[[i]]] && fenceLen[lines[[i]]] >= openLen), i++];
+    {Take[lines, i - 1], If[i > n, {}, Drop[lines, i]]}
+]
+
+(* Pandoc-style fenced divs ":::". An opening line "::: kind" (kind is any
+   non-empty token, e.g. "solved-example", "theorem", "proof", "exercise",
+   "solution") starts a div; the matching "::: " closes it. Divs nest.
+   Used by the Chapter template to scaffold the multi-cell book constructs
+   (SolvedExample, Theorem/Proof, Exercise/Solution) that have no direct
+   markdown analogue. *)
+divOpenQ[line_String] := Block[{t = StringTrim[line]},
+    StringStartsQ[t, ":::"] && StringTrim[StringDrop[t, 3]] =!= ""
+]
+divCloseQ[line_String] := StringTrim[line] === ":::"
+divKind[line_String] := StringTrim[StringDrop[StringTrim[line], 3]]
+
+(* gather lines until the matching ::: closer; respects nested divs *)
+divSplit[lines_List] := Block[{depth = 1, acc = {}, rest = lines},
+    While[depth > 0 && rest =!= {},
+        Which[
+            divOpenQ[First[rest]],
+                depth++; AppendTo[acc, First[rest]]; rest = Rest[rest],
+            divCloseQ[First[rest]],
+                depth--;
+                If[depth > 0, AppendTo[acc, First[rest]]];
+                rest = Rest[rest],
+            True,
+                AppendTo[acc, First[rest]]; rest = Rest[rest]
+        ]
+    ];
+    {acc, rest}
 ]
 
 paraSplit[{}, collected_] := {Reverse[collected], {}}
 paraSplit[lines_List, collected_] := Block[{line = First[lines]},
     If[ StringTrim[line] === "" || fenceQ[line] || headingQ[line] || listItemQ[line] ||
-            orderedItemQ[line] || blockquoteQ[line] || mathBlockOpenQ[line],
+            orderedItemQ[line] || blockquoteQ[line] || mathBlockOpenQ[line] ||
+            divOpenQ[line] || divCloseQ[line],
         {Reverse[collected], lines},
         paraSplit[Rest[lines], Prepend[collected, line]]
     ]
@@ -259,7 +308,21 @@ tableRowLineQ[line_String] := StringContainsQ[line, "|"] && StringTrim[line] =!=
 tableSepQ[line_String] := StringContainsQ[line, "-"] && StringContainsQ[line, "|"] &&
     StringMatchQ[StringTrim[line], ("|" | ":" | "-" | " ") ..]
 
-splitTableRow[line_String] := StringTrim /@ StringSplit[StringTrim[StringTrim[line], "|"], "|"]
+(* GitHub-flavored Markdown lets a cell contain a literal `|` by
+   escaping it as `\|` - the backslash protects the pipe from being
+   read as a cell delimiter. We split on UNescaped `|`s by temporarily
+   swapping `\|` for a U+0001 sentinel character (never appears in
+   normal Markdown), splitting on `|`, then swapping the sentinel back
+   to a literal `|` in each cell. *)
+splitTableRow[line_String] := Block[{sentinel = FromCharacterCode[1]},
+    Map[
+        StringReplace[#, sentinel -> "|"] &,
+        StringTrim /@ StringSplit[
+            StringReplace[StringTrim[StringTrim[line], "|"], "\\|" -> sentinel],
+            "|"
+        ]
+    ]
+]
 
 tableSplit[{}, collected_] := {Reverse[collected], {}}
 tableSplit[lines_List, collected_] := If[ tableRowLineQ[First[lines]],
@@ -290,8 +353,16 @@ blockLoop[lines_List, acc_] := Block[{line = First[lines], rest = Rest[lines], s
             blockLoop[rest, acc]
         ,
         fenceQ[line],
-            split = fenceSplit[rest, {}];
-            blockLoop[Last[split], Prepend[acc, codeBlock[StringReplace[StringTrim[line], StartOfString ~~ "```" -> ""], First[split]]]]
+            split = fenceSplit[rest, fenceLen[line]];
+            blockLoop[Last[split], Prepend[acc, codeBlock[StringReplace[StringTrim[line], StartOfString ~~ ("`" ..) -> ""], First[split]]]]
+        ,
+        divOpenQ[line],
+            split = divSplit[rest];
+            blockLoop[Last[split], Prepend[acc,
+                <|"Type" -> "Div",
+                  "Kind" -> divKind[line],
+                  "Blocks" -> parseBlocks[StringRiffle[First[split], "\n"]]|>
+            ]]
         ,
         headingQ[line],
             blockLoop[rest, Prepend[acc, headingBlock[line]]]
@@ -391,11 +462,21 @@ resolveIncludes[blocks_List, base_String] := Map[resolveBlock[#, base] &, blocks
 
 (* === sections === *)
 
+(* Canonicalise a heading title to its section-key form. The doc-template's
+   ExampleSection cells ship with "&" in titles ("Properties & Relations",
+   "Scope & Additional Elements"); some hand-authored .md files use the
+   word "and" instead. Normalise both to the same canonical key so a doc
+   that round-trips through NotebookToMarkdown (which recovers the
+   template's literal "&" title) is re-recognised on the next forward
+   build. *)
+sectionKey[text_String] := StringReplace[ToLowerCase[text], " & " -> " and "]
+
 sectionsFrom[blocks_List] := Block[{step, init},
     init = <|"key" -> "", "acc" -> <||>|>;
     step[state_, b_] := Which[
         b["Type"] === "Heading" && b["Level"] <= 2,
-            <|"key" -> ToLowerCase[b["Text"]], "acc" -> Append[state["acc"], ToLowerCase[b["Text"]] -> {}]|>
+            With[{k = sectionKey[b["Text"]]},
+                <|"key" -> k, "acc" -> Append[state["acc"], k -> {}]|>]
         ,
         state["key"] === "",
             state
@@ -406,7 +487,32 @@ sectionsFrom[blocks_List] := Block[{step, init},
     Fold[step, init, blocks]["acc"]
 ]
 
-executableQ[b_] := b["Type"] === "Code" && MemberQ[{"wl", "wolfram", "mathematica"}, b["Lang"]] && TrueQ[Lookup[b["Options"], "eval", True]]
+(* "#| boxes: true" reads the cell content as a literal box expression
+   (parsed by ToExpression, not evaluated) and splices it directly into
+   BoxData - the author writes raw RowBox / GridBox / TemplateBox /
+   TagBox / TooltipBox and the converter renders those boxes unchanged.
+   A boxes cell is non-executable by definition, so executableQ excludes
+   it the same way "#| eval: false" is excluded - the non-executable
+   rendering path then dispatches in nonExecutableCell to emit a boxed
+   Input cell instead of a Program-styled plain-text cell. *)
+boxesLiteralQ[b_] := TrueQ[Lookup[b["Options"], "boxes", False]]
+
+executableQ[b_] := b["Type"] === "Code" && MemberQ[{"wl", "wolfram", "mathematica"}, b["Lang"]] && TrueQ[Lookup[b["Options"], "eval", True]] && ! boxesLiteralQ[b]
+
+(* parse the cell text as a Wolfram expression with no evaluation and
+   return it as-is for use as box data; on a parse failure fall back to
+   the raw string so the author sees the source rather than nothing. *)
+cellLiteralBoxes[code_String] := With[{e = Quiet @ ToExpression[code, InputForm, HoldComplete]},
+    Replace[e, {HoldComplete[expr_] :> expr, _ :> code}]
+]
+
+(* non-executable code-block rendering: a Program-styled plain-text cell
+   for `#| eval: false`, an Input cell whose BoxData is the literal
+   parsed box expression for `#| boxes: true`. *)
+nonExecutableCell[b_] := If[boxesLiteralQ[b],
+    Cell[BoxData[cellLiteralBoxes[b["Code"]]], "Input"],
+    Cell[b["Code"], "Program"]
+]
 
 sectionCells[sections_, key_] := Cases[Lookup[sections, key, {}], b_ /; executableQ[b]]
 
@@ -424,9 +530,53 @@ sectionText[sections_, key_] := StringRiffle[
 
 (* === notebook evaluation with a cumulative-hash cache ===
    All executable cells are evaluated in document order, threading state, so a
-   cell's cache key depends on every cell before it (whole-notebook sequence). *)
+   cell's cache key depends on every cell before it. The "EvaluateSeparator"
+   MarkdownToNotebook option picks the granularity of isolation between
+   cells:
+     Automatic - reset at "---" thematic breaks and at every heading,
+                 at any level (the default - each (sub)section runs
+                 in a clean context). A reset clears only symbols
+                 INTRODUCED AFTER the document's "## Definition" section
+                 has run; the definition's symbols (the FunctionResource
+                 function, helper bindings) persist across every later
+                 section. The protected baseline is snapshotted at the
+                 first reset that follows the definition section, so an
+                 example that introduces a temp local helper is wiped
+                 between sections but the resource's function is not.
+     All       - reset before every executable cell, so each cell runs
+                 in a fresh context with its hash depending only on
+                 its own code (maximum isolation, minimum cache reuse).
+                 The same definition-preservation rule applies.
+     None      - no reset; the whole notebook shares one eval context
+                 and the cumulative-hash chain spans every cell.
+                 Supported but not recommended: per-example helpers
+                 leak across every later section, so a stray binding in
+                 ## Basic Examples may collide with names in ## Scope.
+                 Put binding that legitimately needs to cross sections
+                 in the document's ## Definition section, and let
+                 Automatic preserve only it.
+   The input list interleaves executable cells, "Separator" blocks, and
+   "Heading" blocks; the returned hash list has one entry per executable
+   cell (boundaries contribute a reset, not a hash). *)
 
-cumulativeHashes[cells_List] := Map[Hash, Rest @ FoldList[#1 <> mdSep <> #2["Code"] &, "", cells]]
+resetBoundaryQ[mode_, item_] := Switch[mode,
+    None,        False,
+    All,         MatchQ[item["Type"], "Separator" | "Heading"] || executableQ[item],
+    _,           MatchQ[item["Type"], "Separator" | "Heading"]
+]
+
+cumulativeHashes[mode_, items_List] := Block[{acc = "", hashes = {}},
+    Scan[
+        item |-> (
+            If[resetBoundaryQ[mode, item], acc = ""];
+            If[executableQ[item],
+                acc = acc <> mdSep <> item["Code"]; AppendTo[hashes, Hash[acc]]
+            ]
+        ),
+        items
+    ];
+    hashes
+]
 
 (* the light/dark mode example renderings are pinned to. Default light (the
    deployed notebook is light); the markdown-out twin sets it to "Dark". Guard the
@@ -447,7 +597,7 @@ If[! ValueQ[$convertDepth], $convertDepth = 0]
    LightDark -> "Light" already baked in; appending a second LightDark would
    leave both in the option sequence and the front end would honour the first
    (Light) one, so strip any existing LightDark before setting ours. *)
-resultNotebook[res_] := Block[{nb = If[Head[res] === NotebookObject, NotebookGet[res], res]},
+resultNotebook[res_] := Block[{nb = If[MatchQ[res, _NotebookObject], NotebookGet[res], res]},
     nb /. Notebook[c_, o___] :> Notebook[c, Sequence @@ DeleteCases[{o}, LightDark -> _], LightDark -> $lightDark]
 ]
 
@@ -477,7 +627,7 @@ capRaster[img_] := If[ ! ImageQ[img], img,
 
 outputBoxes[res_, opts_] := Which[
     res === Null, Null,
-    Head[res] === NotebookObject,
+    MatchQ[res, _NotebookObject],
         (* a whole-notebook thumbnail can be enormous; rasterize at a lower
            resolution and cap the height so the cell does not trip the analysis
            "huge raster" / "large screen area" checks, while still showing the
@@ -485,60 +635,212 @@ outputBoxes[res_, opts_] := Which[
         With[{img = Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 96]},
             Quiet @ NotebookClose[res];
             ToBoxes @ capRaster[img]],
-    TrueQ[Lookup[opts, "screenshot", False]] && Head[res] === Notebook,
+    TrueQ[Lookup[opts, "screenshot", False]] && MatchQ[res, _Notebook],
         ToBoxes @ capRaster @ Quiet @ Rasterize[resultNotebook[res], ImageResolution -> 144],
     True, ToBoxes[res]
 ]
 
-(* a captured message string -> a notebook "Message" cell. captureMessages
+(* a captured message string -> a notebook "Message" cell. captureCellRun
    redirects $Messages to a write stream and we read the printed text back
    verbatim, so the cell text is exactly the line the kernel itself printed -
    no template lookup, no arg substitution to redo. *)
 messageCell[s_String] := Cell[s, "Message", "MSG"]
 messageCell[hf_] := Cell[ToString[hf, InputForm], "Message", "MSG"]
 
-(* Plain-text rendering of a captured message for the markdown twin: just a
-   blockquote with each line prefixed. The message text is whatever the kernel
-   itself would print to $Messages, so what shows up is exactly what an
-   interactive user would see fire for that cell. *)
+(* Captured Print / Echo output -> a notebook "Print" cell.
+   Print is intercepted by Block-shadowing the symbol (rebinding $Output
+   does NOT re-route Print under `wl -f`: it writes straight to stdout via
+   a hardcoded channel; only a local Block-binding on the Protected symbol
+   intercepts). Each arg is coerced individually: a string splices as a
+   literal box leaf (matching notebook Print's "unquoted strings"
+   semantics), any other expression goes through ToBoxes - so
+   Print[graphic] / Print[image] / Print[dataset] / Print[typeset] all
+   render correctly in the resulting cell instead of collapsing to
+   "-Graphics-" the way a `ToString` round-trip would. *)
+printArgBoxes[s_String] := s
+printArgBoxes[expr_] := ToBoxes[expr]
+
+printCellFromArgs[args_List] := With[{bs = printArgBoxes /@ args},
+    Cell[BoxData[If[Length[bs] === 1, First[bs], RowBox[bs]]], "Print"]
+]
+
+(* Backwards-compat: old cache entries stored Print output as plain text
+   chunks. Wrap any string entries in a Print cell on the way out. *)
+asPrintCell[s_String] := Cell[s, "Print"]
+asPrintCell[c_Cell] := c
+asPrintCell[other_] := Cell[ToString[other, InputForm], "Print"]
+
+(* Plain-text rendering of captured messages / prints for the markdown twin.
+   Messages are always strings (the kernel writes them as text to
+   $Messages). Print cells may be rich - a string-only Print becomes a
+   blockquote, anything richer rasterises to a screenshot image. *)
 messageMd[s_String] := "> " <> StringReplace[StringTrim[s], "\n" -> "\n> "]
 messageMd[_] := ""
 
-(* Capture the messages the kernel would *print* during evaluation, by
-   redirecting $Messages to a private write stream. This is the proper fix
-   for the "ton of garbage in the twin" problem - Internal`HandlerBlock
-   captures every fired message, including the 50k OptionValue::optnf and
-   General::newsym Wolfram's own framework fires per Plot and which the
-   kernel's normal message printer silently swallows (most of them have
-   $Off-style suppression, are inside an Internal`InheritedBlock[{$Off}, ...]
-   in Charting, or hit General::stop). Redirecting the print stream is the
-   *one* mechanism that respects all of those: whatever the kernel decides
-   to actually print, we capture verbatim. *)
+(* Extract a textual form from a captured Print cell, or Missing if it
+   carries rich content (a GraphicsBox, a Dataset, a TemplateBox, ...).
+   Used by the twin renderer to decide between a blockquote and a
+   rasterised image. *)
+printTextForm[s_String] := s
+printTextForm[Cell[s_String, "Print", ___]] := s
+printTextForm[Cell[BoxData[s_String], "Print", ___]] := s
+printTextForm[Cell[BoxData[RowBox[lst_List]], "Print", ___]] /;
+    AllTrue[lst, StringQ] := StringJoin[lst]
+printTextForm[_] := Missing["Rich"]
 
-captureMessages[expr_] := Module[{tmp, stream, res, txt, msgs},
-    tmp = FileNameJoin[{$TemporaryDirectory,
-        "mtnb-msg-" <> IntegerString[$KernelID, 36] <> "-" <>
-        IntegerString[RandomInteger[10^9], 36] <> ".txt"}];
-    stream = OpenWrite[tmp];
-    res = Block[{$Messages = {stream}}, expr];
-    Close[stream];
-    txt = If[FileExistsQ[tmp], Quiet @ Import[tmp, "Text"], ""];
-    Quiet @ DeleteFile[tmp];
-    msgs = If[StringQ[txt] && StringTrim[txt] =!= "",
-        DeleteCases[Map[StringTrim, StringSplit[txt, "\n\n"]], ""],
+(* Capture EVERYTHING a cell's evaluation would produce in a real notebook,
+   without relying on the FE-driven NotebookEvaluate (which hangs in headless
+   `wl` since there is no FE->kernel link to drive it). Three complementary
+   mechanisms cover the four observable channels:
+
+   - Messages: redirect $Messages to a private write stream. Captures every
+     fired message including the OptionValue::optnf / General::newsym noise
+     Wolfram's framework fires per Plot (mostly suppressed by $Off / Stop /
+     Internal`InheritedBlock in Charting). Redirecting the print stream is
+     the *one* mechanism that respects all of those - whatever the kernel
+     decides to actually print, we capture verbatim.
+
+   - Print / Echo: Block-shadow the symbols. In script mode ($Output is
+     {OutputStream[stdout]}, no FE link), rebinding $Output does NOT
+     re-route Print - it writes straight to stdout via a hardcoded channel.
+     A local Block-binding on the Protected symbol works inside the
+     dynamic scope without touching the global definition.
+
+   - Intermediate Output values: parse the cell source into top-level
+     statements (Hold[s1, s2, ..., sN]) and evaluate each in order. A
+     statement whose held form is CompoundExpression[..., Null] (a
+     `;`-terminated source line) suppresses its Output cell - matching
+     notebook semantics. Plain expressions emit one Output per statement,
+     so a cell with `1+1\n2+2\n3+3` round-trips with three Output cells,
+     not just the last value Get returned previously.
+
+   - CellPrint: Block-shadow to capture cells injected by EchoFunction,
+     ResourceObject scrapers, or hand-written CellPrint calls. The captured
+     cells render in-line right after the Print/Echo cells.
+
+   Returns <|"outs" -> {boxes-or-Missing per non-suppressed statement},
+              "msgs" -> {message text, ...},
+              "prints" -> {print text, ...},
+              "cells" -> {injected cell, ...}|>.
+   Failed Get / parse returns "outs" -> {Missing[]} so callers downstream
+   still see the failure as a no-output cell rather than a crash. *)
+captureCellRun[code_String, opts_Association : <||>] := Block[{msgFile, msgStream, stmts, outs, cellsExtra, msgTxt, msgs, prints},
+    msgFile = CreateFile[];
+    msgStream = OpenWrite[msgFile];
+    stmts = Quiet @ ToExpression[code, InputForm, Hold];
+    If[Head[stmts] =!= Hold, stmts = Hold[code]];  (* parse failure: re-run for the message *)
+    outs = {};
+    cellsExtra = {};
+    prints = {};
+    Block[{$Messages = {msgStream}, Print, Echo, CellPrint},
+        (* Print accumulates a real Cell built from the args, not a text
+           chunk - so Print[graphics], Print[image], Print[dataset], or
+           Print["count: ", n] each render correctly downstream. *)
+        Print[args___] := (AppendTo[prints, printCellFromArgs[{args}]]; Null);
+        Echo[e_] := (Print[">> ", e]; e);
+        Echo[e_, label_] := (Print[">> ", label, " ", e]; e);
+        Echo[e_, label_, f_] := (Print[">> ", label, " ", f[e]]; e);
+        CellPrint[c_Cell] := (AppendTo[cellsExtra, c]; Null);
+        CellPrint[cs_List] := (cellsExtra = Join[cellsExtra, Cases[cs, _Cell]]; Null);
+        (* Walk statements: each held position is extracted with Extract,
+           which preserves the Hold wrapper so we can inspect its surface
+           form before releasing it. A CompoundExpression[..., Null] tail
+           is the source's "no output" mark - skip emission for that. *)
+        Do[
+            With[{heldStmt = Extract[stmts, i, Hold]},
+                If[ MatchQ[heldStmt, Hold[CompoundExpression[___, Null]]],
+                    (* suppressed - evaluate for side effects, no Output *)
+                    ReleaseHold[heldStmt],
+                    AppendTo[outs, outputBoxes[ReleaseHold[heldStmt], opts]]
+                ]
+            ],
+            {i, Length[stmts]}
+        ]
+    ];
+    Close[msgStream];
+    msgTxt = If[FileExistsQ[msgFile], Quiet @ Import[msgFile, "Text"], ""];
+    Quiet @ DeleteFile[msgFile];
+    msgs = If[StringQ[msgTxt] && StringTrim[msgTxt] =!= "",
+        DeleteCases[Map[StringTrim, StringSplit[msgTxt, "\n\n"]], ""],
         {}];
-    {res, msgs}
+    <|"outs" -> outs, "msgs" -> msgs, "prints" -> prints, "cells" -> cellsExtra|>
 ]
-SetAttributes[captureMessages, HoldFirst]
 
-accumEval[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], res, msgs, tmp},
-    (* Get a temp package so every top-level statement runs (ToExpression on a
-       multi-statement string only takes the first); Get returns the last value. *)
-    tmp = FileNameJoin[{$TemporaryDirectory, "mtnb-cell-" <> IntegerString[Hash[code], 36] <> ".wl"}];
-    Export[tmp, b["Code"], "Text"];
-    {res, msgs} = captureMessages @ Get[tmp];
-    <|"code" -> code,
-      "out" -> Append[state["out"], Hash[code] -> <|"out" -> outputBoxes[res, b["Options"]], "msgs" -> msgs|>]|>
+(* Snapshot every symbol currently bound in the document context tree -
+   "ctx`*" matches symbols in ctx; "ctx`**`*" matches symbols in every
+   sub-context underneath ctx (a single "ctx`**" only matches the
+   immediate context). *)
+docContextSymbols[ctx_String] := Join[
+    Quiet @ Names[ctx <> "*"],
+    Quiet @ Names[ctx <> "**`*"]
+]
+
+(* A reset clears every symbol introduced AFTER the protected baseline was
+   captured, drops the cumulative code chain so the next cell's cache key
+   starts fresh, and ClearSystemCache[]s so any AutoMemoization / Once
+   entries do not leak. The baseline (state["protected"]) is the set of
+   symbols defined by the document's "## Definition" section - captured
+   at the first reset boundary that follows that section (see accumEval).
+   While protected is still None, the doc hasn't crossed the boundary
+   yet, so nothing is cleared - this lets all "## Definition" code finish
+   without losing its own bindings on the intervening heading boundary
+   inside the definition area.  The host session's Global` and unrelated
+   paclets are left alone - only the per-doc context tree is wiped. *)
+resetState[state_] := If[
+    state["protected"] === None,
+    (* pre-definition area: cumulative code chain still resets so cache
+       keys don't span the boundary, but we keep every bound symbol. *)
+    (ClearSystemCache[]; <|state, "code" -> ""|>),
+    Block[{toRemove = Complement[docContextSymbols[state["ctx"]], state["protected"]]},
+        If[toRemove =!= {}, Quiet @ ClearAll @@ toRemove];
+        ClearSystemCache[];
+        <|state, "code" -> ""|>
+    ]
+]
+
+evalCell[state_, b_] := Block[{code = state["code"] <> mdSep <> b["Code"], captured},
+    (* captureCellRun parses b["Code"] into top-level statements via
+       ToExpression[..., Hold] so every statement runs in document order
+       and each non-`;`-suppressed value contributes its own Output - matching
+       how a notebook cell with multiple expressions renders multiple Out[n]s.
+       outputBoxes is applied per-value inside the capture (the cell's options
+       e.g. "screenshot" / "tear" / "image" route through to each output). *)
+    captured = captureCellRun[b["Code"], b["Options"]];
+    <|state, "code" -> code,
+      "out" -> Append[state["out"], Hash[code] -> captured]|>
+]
+
+(* A reset boundary item that follows the definition section is the moment
+   we lock in the protected baseline: snapshot every symbol currently bound
+   in the doc context tree and record it as state["protected"]. The
+   detection is simple - this fires the first time we see a Heading whose
+   text matches a known example section ("Basic Examples", "Scope", etc.)
+   after at least one executable cell has run. For docs without a
+   definition section the baseline ends up empty (snapshot of an empty
+   context), which is the correct degenerate case: every reset clears
+   everything, the historical Automatic behaviour. *)
+$exampleHeadingMatchQ[text_String] := MemberQ[$exampleOrder, ToLowerCase[StringTrim[text]]]
+$exampleHeadingMatchQ[_] := False
+
+captureProtectedQ[state_, b_] :=
+    state["protected"] === None && state["primed"] === True &&
+        b["Type"] === "Heading" && $exampleHeadingMatchQ[b["Text"]]
+
+(* fold step: per "EvaluateSeparator" mode, reset before this item if it is
+   a boundary, then evaluate if it is an executable cell. Separator /
+   Heading blocks just trigger a reset; in mode All every executable cell
+   triggers a reset before its own evaluation. Capture the protected
+   baseline before clearing if this boundary marks the transition into
+   the first example section. *)
+accumEval[state0_, b_] := Block[{state = state0, s},
+    If[ captureProtectedQ[state, b],
+        state = <|state, "protected" -> docContextSymbols[state["ctx"]]|>
+    ];
+    s = If[resetBoundaryQ[state["mode"], b], resetState[state], state];
+    If[executableQ[b],
+        With[{s2 = evalCell[s, b]}, <|s2, "primed" -> True|>],
+        s
+    ]
 ]
 
 (* Pre-load every package whose first use during evaluation would otherwise
@@ -573,31 +875,79 @@ preloadContextPath[ctxPath_List] := Quiet @ Scan[
     DeleteDuplicates @ Select[Join[$framePackages, ctxPath], # =!= "System`" &]
 ]
 
+(* Install a one-symbol forwarding alias in the per-doc context so example
+   cells in a self-referential document can call MarkdownToNotebook
+   unqualified WITHOUT having Context[MarkdownToNotebook] on $ContextPath
+   (which would expose every internal helper and Block local as a public
+   symbol the example can collide with - see issue #5).
+
+   Sets the OwnValue of <ctx>`MarkdownToNotebook to the real
+   MarkdownToNotebook symbol, so an example's `MarkdownToNotebook[...]`
+   resolves to <ctx>`MarkdownToNotebook (via $Context lookup at parse
+   time), then evaluates to MarkdownToNotebook[...] via the OwnValue.
+
+   $Context is rebound to ctx and $ContextPath stripped to System` for
+   the ToExpression call so the LHS interns into ctx (creating
+   ctx`MarkdownToNotebook) while the RHS - a fully qualified name -
+   resolves to the real symbol regardless. *)
+installSelfAlias[ctx_String] := With[{realName = Context[MarkdownToNotebook] <> "MarkdownToNotebook"},
+    Block[{$Context = ctx, $ContextPath = {"System`"}},
+        Quiet @ ToExpression["MarkdownToNotebook = " <> realName, InputForm]
+    ]
+]
+
 (* a front end is active for the whole pass so an example may open the notebook it
    produces (NotebookPut) and have its thumbnail captured (see outputBoxes). *)
-evaluateAll[cells_List, ctx_String, ctxPath_List] := Block[{$Context = ctx, $ContextPath = ctxPath},
+evaluateAll[items_List, ctx_String, ctxPath_List, mode_] := Block[{$Context = ctx, $ContextPath = ctxPath},
     preloadContextPath[ctxPath];
-    UsingFrontEnd[Fold[accumEval, <|"code" -> "", "out" -> <||>|>, cells]]["out"]
+    UsingFrontEnd[Fold[accumEval,
+        <|"code" -> "", "out" -> <||>, "ctx" -> ctx, "mode" -> mode,
+          "protected" -> None, "primed" -> False|>,
+        items]]["out"]
 ]
 
 (* attach each executable block's output (by cumulative hash) so builders read
    block["OutputBoxes"] / block["Messages"] directly instead of recomputing hashes.
    The cache entry is normally an Association <|"out" -> boxes, "msgs" -> {...}|>;
    accept the legacy raw-boxes form too (older cache entries with no message data). *)
-annotateOutputs[blocks_List, hashes_List, outputs_] := Block[{i = 0, entry, out, msgs},
-    Map[
-        b |-> If[ executableQ[b],
-            (i += 1;
-             entry = Lookup[outputs, hashes[[i]], Missing[]];
-             {out, msgs} = If[AssociationQ[entry] && KeyExistsQ[entry, "out"],
-                 {entry["out"], Lookup[entry, "msgs", {}]},
-                 {entry, {}}
-             ];
-             Append[Append[b, "OutputBoxes" -> out], "Messages" -> msgs]),
-            b
-        ],
-        blocks
-    ]
+annotateOutputs[blocks_List, hashes_List, outputs_] := Block[{i = 0, walk},
+    walk[b_] := Which[
+        executableQ[b],
+            Block[{entry, outsList, msgs, prints, cellsExtra},
+                i += 1;
+                entry = Lookup[outputs, hashes[[i]], Missing[]];
+                (* Three cache shapes to accommodate:
+                     - new: <|"outs" -> {boxes...}, "msgs" -> ..., "prints" -> ..., "cells" -> {...}|>
+                     - intermediate: <|"out" -> boxes, "msgs" -> ..., "prints" -> ...|>
+                     - legacy: bare boxes (no association)
+                   The "outs" list may be empty (a cell whose only statements
+                   are `;`-suppressed) - that's intentional, render as
+                   input + prints + messages with no Output cell. *)
+                {outsList, msgs, prints, cellsExtra} = Which[
+                    AssociationQ[entry] && KeyExistsQ[entry, "outs"],
+                        {entry["outs"], Lookup[entry, "msgs", {}],
+                         Lookup[entry, "prints", {}], Lookup[entry, "cells", {}]},
+                    AssociationQ[entry] && KeyExistsQ[entry, "out"],
+                        {{entry["out"]}, Lookup[entry, "msgs", {}],
+                         Lookup[entry, "prints", {}], {}},
+                    True,
+                        {{entry}, {}, {}, {}}
+                ];
+                Append[Append[Append[Append[
+                    Append[b, "OutputBoxes" -> First[outsList, Missing[]]],
+                    "Outputs" -> outsList],
+                    "Messages" -> msgs],
+                    "Prints" -> prints],
+                    "ExtraCells" -> cellsExtra]
+            ],
+        b["Type"] === "Div",
+            (* recurse: walk the Div's inner blocks, the counter `i`
+               continues from the outer walk so each cell's hash and
+               output map line up. *)
+            Append[b, "Blocks" -> walk /@ b["Blocks"]],
+        True, b
+    ];
+    walk /@ blocks
 ]
 
 (* === notebook cell builders === *)
@@ -608,22 +958,26 @@ annotateOutputs[blocks_List, hashes_List, outputs_] := Block[{i = 0, entry, out,
    doc supplies whatever subset is meaningful, and exampleNotebookSlot renders only
    the present sections in this order. *)
 $exampleOrder = {
-    "basic examples", "scope", "scope & additional elements", "options", "applications",
+    "basic examples", "scope", "scope & additional elements",
+    "generalizations & extensions", "options", "applications",
     "visualizations", "analysis",
-    "properties and relations", "possible issues", "neat examples"
+    "properties and relations", "possible issues", "neat examples",
+    "requirements"
 }
 
 $exampleTitle = <|
     "basic examples" -> "Basic Examples",
     "scope" -> "Scope",
     "scope & additional elements" -> "Scope & Additional Elements",
+    "generalizations & extensions" -> "Generalizations & Extensions",
     "options" -> "Options",
     "applications" -> "Applications",
     "visualizations" -> "Visualizations",
     "analysis" -> "Analysis",
     "properties and relations" -> "Properties and Relations",
     "possible issues" -> "Possible Issues",
-    "neat examples" -> "Neat Examples"
+    "neat examples" -> "Neat Examples",
+    "requirements" -> "Requirements"
 |>
 
 $osCanonical = <|
@@ -702,8 +1056,19 @@ fillCheckbox[property_String, checked_List, type_String : "Function"] := {
    ToBoxes[Defer[...]] instead *renders* display heads (Framed, Style, Grid, Row,
    RGBColor, ...) into frames/swatches, corrupting the Input cell. Fall back to
    the Defer parse, then the raw string, if the front end is unavailable. *)
-inputBoxes[code_String] := Block[{boxes, parsed},
-    boxes = Quiet @ UsingFrontEnd @ MathLink`CallFrontEnd[FrontEnd`ReparseBoxStructurePacket[StringTrim[code]]];
+inputBoxes[code_String] := Block[{boxes, parsed, trimmed = StringTrim[code]},
+    (* LaTeX-style "\command" sequences (\left, \right, \sqrt, \to, \notin, ...)
+       collide with Wolfram's string-escape syntax: the front end's reparser
+       interprets "\r" / "\n" / "\t" / "\b" / "\f" as their control-character
+       escapes, so "\right" gets tokenised as "\r" + "ight". For inputs containing
+       backslash + two-or-more-letter commands - never valid bare WL, but the
+       normal shape of inline LaTeX - skip the reparse and emit the raw string
+       so it renders verbatim. "\[Name]" Wolfram named characters are unaffected
+       because they have "[" (not a letter) after the backslash. *)
+    If[StringContainsQ[trimmed, "\\" ~~ LetterCharacter ~~ LetterCharacter],
+        Return[trimmed]
+    ];
+    boxes = Quiet @ UsingFrontEnd @ MathLink`CallFrontEnd[FrontEnd`ReparseBoxStructurePacket[trimmed]];
     If[ FreeQ[boxes, $Failed] && (StringQ[boxes] || ! AtomQ[boxes]),
         boxes,
         parsed = Quiet @ ToExpression[code, StandardForm, Defer];
@@ -745,21 +1110,31 @@ extraOutputOpts[block_] := If[
    resulting panel image is wanted in the published notebook - showing the
    call would clutter the snapshot section. Toggled per-cell with
    "#| input: false". *)
-exampleIO[code_String, outBoxes_, n_Integer, outOpts_List : {}, msgs_List : {}, hideInput : (True | False) : False] := Block[{
+exampleIO[code_String, outBoxes_, n_Integer, outOpts_List : {}, msgs_List : {}, hideInput : (True | False) : False, prints_List : {}, extraCells_List : {}, outsList_List : Automatic] := Block[{
     inCell = Cell[BoxData[inputBoxes[code]], "Input", CellLabel -> "In[" <> ToString[n] <> "]:= "],
+    printCells = asPrintCell /@ prints,
     msgCells = messageCell /@ msgs,
-    outCell
+    outputCells, allOuts
 },
+    (* prefer the explicit per-statement outs list when given; fall back to
+       the single OutputBoxes for legacy callers. A "No useful output" cell
+       (Missing[] / Null entry) is dropped so a Cell whose only statements
+       are `;`-suppressed renders cleanly as input + prints. *)
+    allOuts = If[ListQ[outsList] && outsList =!= {Automatic} && outsList =!= Automatic,
+        outsList, {outBoxes}];
+    allOuts = DeleteCases[allOuts, _?MissingQ | Null];
+    outputCells = MapIndexed[
+        With[{label = If[hideInput, Nothing, CellLabel -> "Out[" <> ToString[n] <> If[Length[allOuts] > 1, "@" <> ToString[First[#2]], ""] <> "]= "]},
+            Cell[BoxData[#1], "Output", label, Sequence @@ outOpts]] &,
+        allOuts];
     Which[
-        MissingQ[outBoxes] || outBoxes === Null,
-            If[hideInput, msgCells, Join[{inCell}, msgCells]],
+        outputCells === {},
+            If[hideInput, Flatten[{extraCells, printCells, msgCells}],
+               Flatten[{inCell, extraCells, printCells, msgCells}]],
         hideInput,
-            (* output-only: no Input cell, no In/Out label, no group bracket *)
-            outCell = Cell[BoxData[outBoxes], "Output", Sequence @@ outOpts];
-            Flatten[{msgCells, outCell}],
+            Flatten[{extraCells, printCells, msgCells, outputCells}],
         True,
-            outCell = Cell[BoxData[outBoxes], "Output", CellLabel -> "Out[" <> ToString[n] <> "]= ", Sequence @@ outOpts];
-            {Cell[CellGroupData[Flatten[{inCell, msgCells, outCell}], Open]]}
+            {Cell[CellGroupData[Flatten[{inCell, extraCells, printCells, msgCells, outputCells}], Open]]}
     ]
 ]
 
@@ -845,16 +1220,63 @@ applyHidden[block_, cells_List] := If[
     cells
 ]
 
+(* "#| collapse: input"  ("true" alias) - hide the example's Input cell,
+   keep Output visible. Implemented as CellGroupData[..., {n,...}] where
+   the int-list second arg picks which cells stay visible by 1-based index;
+   the group bracket reveals the hidden cells when clicked.
+   "#| collapse: output" - keep Input visible, hide Output. CellGroupData
+   defaults to showing its first cell when Closed, and the example's first
+   cell IS the Input, so we just set the group state to Closed.
+   "#| collapse: all"    - hide BOTH. CellOpen -> False on each cell of the
+   example's group; the group bracket on the right stays clickable. *)
+collapseMode[v_] := Switch[v,
+    True | "true" | "input" | "Input", "Input",
+    "output" | "Output", "Output",
+    "all" | "All" | "both" | "Both", "All",
+    _, None
+]
+
+(* recurse into nested CellGroupData; at the example group, apply the requested
+   collapse and stop. *)
+applyCollapseMode[mode_String][Cell[CellGroupData[cells_List, state_], go___]] :=
+    Switch[mode,
+        "Input",
+            (* hide Input - show only the indices of the non-Input cells *)
+            With[{visible = Flatten @ Position[cells, Cell[_, s_String, ___] /; s =!= "Input", {1}, Heads -> False]},
+                If[visible === {}, Cell[CellGroupData[cells, state], go],
+                    Cell[CellGroupData[cells, visible], go]
+                ]
+            ],
+        "Output",
+            (* default Closed shows only the first cell (Input); good as-is *)
+            Cell[CellGroupData[cells, Closed], go],
+        "All",
+            (* hide everything - CellOpen -> False per cell, group bracket stays *)
+            Cell[CellGroupData[closeCell /@ cells, state], go]
+    ]
+applyCollapseMode[_][other_] := other
+
+closeCell[Cell[content_, style___, opts:OptionsPattern[]]] :=
+    If[FreeQ[{opts}, CellOpen], Cell[content, style, opts, CellOpen -> False], Cell[content, style, opts]]
+closeCell[other_] := other
+
+applyCollapse[block_, cells_List] := With[{mode = collapseMode[Lookup[block["Options"], "collapse", False]]},
+    If[mode === None, cells, applyCollapseMode[mode] /@ cells]
+]
+
 (* an example's cells (Input / Output), prefixed with its per-cell flag banner
    and decorated with any "excluded" / "hidden" per-cell tag. "#| input: false"
    drops the Input cell - the example renders as just its captured Output (the
    Demonstration-snapshot use case). *)
 exampleIOFor[block_, n_Integer] :=
-    applyExcluded[block, applyHidden[block, withCellFlag[block, exampleIO[
+    applyExcluded[block, applyHidden[block, applyCollapse[block, withCellFlag[block, exampleIO[
         block["Code"], block["OutputBoxes"], n,
         extraOutputOpts[block], Lookup[block, "Messages", {}],
-        Lookup[block["Options"], "input", True] === False
-    ]]]]
+        Lookup[block["Options"], "input", True] === False,
+        Lookup[block, "Prints", {}],
+        Lookup[block, "ExtraCells", {}],
+        Lookup[block, "Outputs", Automatic]
+    ]]]]]
 
 (* a document-level flag banner ("Flag" frontmatter) prepended to the notebook *)
 applyDocFlag[nb_, ""] := nb
@@ -880,8 +1302,20 @@ codeBlockQ[b_] := b["Type"] === "Code" && MemberQ[{"wl", "wolfram", "mathematica
 contentSlot[opts_, sections_] := Block[{cells = Cases[Lookup[sections, "content", {}], b_ /; codeBlockQ[b]]},
     If[ cells === {},
         slotDefault[opts],
-        Map[Cell[BoxData[inputBoxes[#["Code"]]], "Input", CellTags -> {"DefaultContent"}] &, cells]
+        Map[contentCell, cells]
     ]
+]
+
+(* A "#| init: true" content cell becomes a collapsed initialization Code cell -
+   mirroring the FunctionResource definition cell - so a long primary-data
+   assignment (e.g. a big Uncompress[...] payload) initializes on open without
+   showing a wall of source in the deployed notebook. Every other content cell
+   stays a visible Input. Both carry the "DefaultContent" tag the scraper needs. *)
+contentCell[b_] := If[
+    TrueQ[Lookup[b["Options"], "init", False]],
+    Cell[BoxData[inputBoxes[b["Code"]]], "Code",
+        CellTags -> {"DefaultContent"}, InitializationCell -> True, CellOpen -> False],
+    Cell[BoxData[inputBoxes[b["Code"]]], "Input", CellTags -> {"DefaultContent"}]
 ]
 
 (* === single-cell-from-section helpers, used by Prompt and Demonstration ===
@@ -995,8 +1429,13 @@ mathArgsToTemplate[s_String] := StringReplace[s, {
    them. The backticked rule runs first so a "[`X`](url)" does not part-match
    the bare rule and leak its surrounding backticks. *)
 unwrapMarkdownSig[s_String] := StringReplace[s, {
-    "[`" ~~ n : Shortest[Except["`"] ..] ~~ "`](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
-    "[" ~~ n : Shortest[Except["]" | "`" | "\n"] ..] ~~ "](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
+    (* WL-identifier shape only: leading letter / "$", then word chars /
+       "$" / context backticks.  Restricting the label keeps the unwrap
+       from over-matching across WL bracket syntax (e.g.
+       <code>[Function]()[x, [Exp]() @ x]</code> - the outer [x, ...]
+       must not be eaten as if it were a markdown link with label "x, [Exp"). *)
+    "[`" ~~ n : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) ~~ "`](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
+    "[" ~~ n : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) ~~ "](" ~~ Shortest[Except[")"] ...] ~~ ")" :> n,
     "*" ~~ w : Shortest[Except["*" | " "] ..] ~~ "*" :> w
 }]
 
@@ -1027,6 +1466,36 @@ usageStatement[text_String] := Block[{trimmed = StringTrim[text], m},
         1]
 ]
 
+(* one usage line as inline TextData items: ModInfo placeholder + the
+   InlineFormula signature + the prose description. The signature goes through
+   codeInlineCell (the <code>...</code> handler) so the head gets its
+   paclet-ref ButtonBox link while ParseTextTemplate's auto-linking of
+   incidental System symbols inside the args is stripped. *)
+usageLineItems[{code_String, desc_String}] := Block[{trimmedDesc = StringTrim[desc]},
+    Join[
+        {Cell["   ", "ModInfo"], codeInlineCell[code]},
+        If[trimmedDesc === "", {}, Prepend[inlineTextData[trimmedDesc], " "]]
+    ]
+]
+
+(* the palette's "Double Usage Line" template inserts ONE `Cell[..., "Usage"]`
+   whose TextData lists every usage line in the section, separated by
+   newlines. So N "## Usage" paragraphs in markdown collapse into one Usage
+   cell with N lines inside - matching what DoubleUsageLinesInsert writes.
+   Used by the Symbol template's symbolNotebook. The FunctionResource
+   template uses usagePair instead - the WFR resource scraper expects the
+   UsageInputs / UsageDescription pair structure and rejects a single-cell
+   Usage shape. *)
+usageMultiCell[pairs_List] := Cell[
+    TextData @ Flatten @ Riffle[usageLineItems /@ pairs, {"\n"}],
+    "Usage"
+]
+
+(* one usage line as the pair of cells the WFR FunctionResource scraper
+   expects: a UsageInputs cell holding the signature boxes, followed by a
+   UsageDescription cell holding the prose. The two stack as one visual
+   usage line in the resource page; multiple pairs catenate into one
+   CellGroupData. *)
 usagePair[{code_String, desc_String}] := {
     Cell[BoxData[stripLinks @ templateBox[code]], "UsageInputs", FontFamily -> "Source Sans Pro"],
     Cell[TextData @ inlineTextData[desc], "UsageDescription"]
@@ -1172,7 +1641,9 @@ exampleContent[sectionBlocks_, textStyle_String] := Block[{counter = 0, out = {}
             block["Type"] === "Image",
                 AppendTo[out, imageCell[block]],
             executableQ[block],
-                counter += 1; out = Join[out, exampleIOFor[block, counter]]
+                counter += 1; out = Join[out, exampleIOFor[block, counter]],
+            block["Type"] === "Code",
+                out = Join[out, withCellFlag[block, {nonExecutableCell[block]}]]
         ],
         {block, sectionBlocks}
     ];
@@ -1252,10 +1723,11 @@ fillSlot[name_, opts_, data_] := Block[{meta = data["meta"]},
         "Examples", examplesSlot[opts, data["sections"]],
         "ExampleNotebook", exampleNotebookSlot[opts, data["sections"]],
         "VerificationTests", testsSlot[opts, data["sections"]],
-        "Author Notes",
-            With[{an = sectionText[data["sections"], "author notes"]},
-                If[an === "", slotDefault[opts], {cleanCell @ ReplacePart[First[slotDefault[opts]], 1 -> an]}]
-            ],
+        (* fillTextDataCells routes the text through inlineTextData so a
+           markdown link, italic, backtick code span, or inline math in the
+           Author Notes section actually renders. The previous bare-string
+           splice left "[label](url)" as literal text in the cell. *)
+        "Author Notes", fillTextDataCells[opts, sectionText[data["sections"], "author notes"]],
         "CompatibilityFeatures",
             If[ KeyExistsQ[meta, "Features"],
                 fillCheckbox["CompatibilityFeatures", asList @ meta["Features"]],
@@ -1434,6 +1906,13 @@ $docPaclet = ""
 $docContext = ""
 $docTemplate = ""
 
+(* the font family LaTeX math (LaTeXMathParse output) is restyled to, so authored
+   math renders in a Computer-Modern-like face rather than the front end's default
+   math font. "" leaves the parser output untouched; a family name (e.g.
+   "CMU Serif") rewrites every math expression to that family. Set per build from
+   the "MathFont" option (see applyMathFont). *)
+$mathFontFamily = ""
+
 (* Subscripts in a usage signature use the portable HTML form "x<sub>i</sub>" (works
    in every markdown renderer and on GitHub), with "x~i~" accepted as the Pandoc
    shorthand. Both forms are rewritten to ParseTextTemplate's "x$i" template form
@@ -1462,6 +1941,18 @@ templateBox[code_String] := Block[{boxes, prepped = mdToTemplateSubs[StringTrim[
    (in $docContext or System`); ParseTextTemplate by itself does not link a
    page's own symbol, but a "<code>[Self]()</code>" reference should still
    render as a tappable link to the symbol's own ref page. *)
+(* unescape markdown's backslash-punctuation in a prose-bearing context (link
+   labels, <code>...</code> bodies). Wolfram named-character escapes
+   ("\[Theta]", "\[CircleTimes]", ...) share the leading "\[" with markdown's
+   "\[" escape for a literal "[", so the Wolfram-name rule runs FIRST: at a
+   "\[CircleTimes]" position it matches and rebuilds the escape verbatim,
+   blocking the punctuation rule from eating the "\" and turning the kernel
+   char into a stray "[CircleTimes]". *)
+unescapeMarkdownPunctuation[s_String] := StringReplace[s, {
+    "\\[" ~~ name : (LetterCharacter ..) ~~ "]" :> "\\[" <> name <> "]",
+    "\\" ~~ c : PunctuationCharacter :> c
+}]
+
 codeInlineCell[inner_String] := Block[{sig, head, url, boxes, unescaped},
     (* "<code>...</code>" content lets markdown formatting through (links,
        italics, math), so backslash-punctuation escapes inside it are markdown
@@ -1470,18 +1961,8 @@ codeInlineCell[inner_String] := Block[{sig, head, url, boxes, unescaped},
        <code> would land in the .nb as literal "\*" instead of "*", which a
        markdown viewer renders as just "*" but the notebook would show the
        backslash. Backticked spans skip this because backticks freeze content
-       by design - "\*" in `` `code` `` is meant to be literal.
-
-       Wolfram named-character escapes ("\[Theta]", "\[CircleTimes]", ...)
-       share the leading "\[" with the markdown "\[" escape for a literal "[",
-       so list the Wolfram-name rule FIRST: at a "\[CircleTimes]" position
-       it matches and rebuilds the escape verbatim, blocking the punctuation
-       rule from eating the "\" and turning the kernel char into a stray
-       "[CircleTimes]" that the inferred-link parser would then auto-link. *)
-    unescaped = StringReplace[inner, {
-        "\\[" ~~ name : (LetterCharacter ..) ~~ "]" :> "\\[" <> name <> "]",
-        "\\" ~~ c : PunctuationCharacter :> c
-    }];
+       by design - "\*" in `` `code` `` is meant to be literal. *)
+    unescaped = unescapeMarkdownPunctuation[inner];
     sig = mathArgsToTemplate @ unwrapMarkdownSig @ unescaped;
     head = First[StringCases[sig,
         StartOfString ~~ h : ((LetterCharacter | "$") ~~ (WordCharacter | "$" | "`") ...) :> h, 1], ""];
@@ -1507,22 +1988,13 @@ symbolInContextQ[name_String, ctx_String] := ctx =!= "" &&
    ResourceFunction["..."]. We strip those so a usage signature reads as code. *)
 stripLinks[boxes_] := boxes //. ButtonBox[content_, ___] :> content
 
-(* prose inline `code`: if the body is a single known symbol (in $docContext
-   or System`), auto-link it to its ref page - so authors can write `Range` or
-   `WCAGContrastRatio` and get the same clickable code-styled link the
-   explicit "[`Name`](paclet:Pub/Pkg/ref/Name)" form produces, no need to
-   spell the URI by hand. Multi-token bodies ("Range[5]"), names the kernel
-   does not know (a paragraph-locale variable like `x`), and anything that
-   does not look like an identifier pass through as plain InlineFormula -
-   the bare-string fallback inputBoxes builds. *)
-codeToInline[code_String] := Block[{trimmed = StringTrim[code], url},
-    url = If[symbolLikeQ[trimmed] && ! StringContainsQ[trimmed, "`" | "[" | " "],
-        inferURL[trimmed], None];
-    If[ url =!= None,
-        Cell[BoxData[ButtonBox[trimmed, BaseStyle -> "Link", ButtonData -> url]], "InlineFormula"],
-        Cell[BoxData[inputBoxes[code]], "InlineFormula"]
-    ]
-]
+(* prose inline `code` is just an InlineFormula cell - no auto-linking, even
+   when the body is a known symbol name. Linking is opt-in via the explicit
+   "[`Name`]()" / "[Name]()" form (handled by linkInferred) so that a name
+   that collides with a WL symbol but means something else in context (a TeX
+   environment named "Cases", an English word "Range", a variable "x") is
+   not turned into a ref-page link the author did not ask for. *)
+codeToInline[code_String] := Cell[BoxData[inputBoxes[code]], "InlineFormula"]
 
 (* double-backtick ``code`` -> the palette's "Code (Inline)": a literal,
    non-linkified monospace span (InlineCode), unlike Template Input. *)
@@ -1608,13 +2080,61 @@ inlineImage[alt_String, src_String] := Block[{img = Quiet @ Import[src]},
 ]
 
 (* $math$ -> inline math; $$math$$ -> centered display math. The content is TeX
-   (LaTeX math notation): ImportString parses it into typeset boxes (SqrtBox,
-   FractionBox, ...). Fall back to a Wolfram-expression parse in TraditionalForm
-   if the TeX parse fails. *)
-texBoxes[math_String] := Block[{nb},
-    nb = Quiet @ ImportString["$" <> math <> "$", "TeX"];
-    If[Head[nb] === Notebook, FirstCase[nb, Cell[BoxData[b_], ___] :> b, $Failed, Infinity], $Failed]
+   (LaTeX math notation). The Wolfram`Parser`LaTeX` paclet (when installed)
+   is preferred - its LaTeXMathParse handles \mathbb / \frac / big operators
+   / Greek / named symbols properly. Fall back to ImportString[..., "TeX"]
+   (the built-in importer that drops styling) when the paclet isn't
+   available, and to a Wolfram-expression parse if that also fails. *)
+
+(* Restyle LaTeXMathParse output to $mathFontFamily by delegating to the parser
+   paclet's LaTeXMathStyle - it remaps italic letters to their math-italic
+   codepoints for an OpenType math font, pulls \mathbb into MSBM10, and wraps in
+   the family.  Resolved at runtime by full name (so load order doesn't capture
+   the wrong symbol) and guarded on it existing, so MTN still works - unstyled -
+   when the parser isn't available (e.g. the ImportString fallback path). *)
+applyMathFont[boxes_] := Which[
+    $mathFontFamily === "" || boxes === $Failed, boxes,
+    Names["Wolfram`Parser`LaTeXMathStyle"] =!= {},
+        Symbol["Wolfram`Parser`LaTeXMathStyle"][boxes, $mathFontFamily],
+    True, boxes
 ]
+
+texBoxes[math_String] :=
+    Block[{r = wolframParserTeX[math]},
+        applyMathFont @ If[ r =!= $Failed, r, texBoxesViaImport[math] ]
+    ]
+
+(* Detection and call both resolve the parser at *runtime* by its full name.
+   Two traps this avoids: (1) LaTeXMathParse has only DownValues, so the obvious
+   ValueQ[LaTeXMathParse] gate is always False and would reject a perfectly loaded
+   parser; (2) an unqualified `LaTeXMathParse` token is captured to whatever
+   context is active when this file is read - if the paclet loads later, that
+   token names a different (empty) symbol. Symbol["Wolfram`Parser`LaTeXMathParse"]
+   always names the real one once the context exists. Success is judged by the
+   result being box-like; a parse failure returns ParseError[...]/$Failed, which
+   falls through to the ImportString path. *)
+wolframParserTeX[math_String] :=
+    If[ Names["Wolfram`Parser`LaTeXMathParse"] === {},
+        $Failed,
+        Module[{r = Quiet @ Check[Symbol["Wolfram`Parser`LaTeXMathParse"][math], $Failed]},
+            (* Accept whatever boxes the parser returns; only reject its known
+               failure shapes. Head is matched by short name so a ParseError from
+               the paclet's own context still trips it regardless of how this file
+               captured the bare symbol. *)
+            If[ MatchQ[r, $Failed | _Failure] || SymbolName[Head[r]] === "ParseError" || ! FreeQ[r, $Failed],
+                $Failed,
+                r
+            ]
+        ]
+    ]
+
+texBoxesViaImport[math_String] :=
+    Block[{nb = Quiet @ ImportString["$" <> math <> "$", "TeX"]},
+        If[ MatchQ[nb, _Notebook],
+            FirstCase[nb, Cell[BoxData[b_], ___] :> b, $Failed, Infinity],
+            $Failed
+        ]
+    ]
 
 mathInline[math_String] := Block[{boxes = texBoxes[math]},
     If[ boxes === $Failed,
@@ -1665,11 +2185,14 @@ linkInline[text_String, url_String] := Which[
        as literal text. *)
     url === "" && backtickedQ[text], linkInferred[StringTake[text, {2, -2}]],
     url === "" && symbolLikeQ[text], linkInferred[text],
-    url === "", text,
-    (* a `code`-wrapped label is a code-styled reference link *)
+    url === "", unescapeMarkdownPunctuation[text],
+    (* a `code`-wrapped label is a code-styled reference link; backslash escapes
+       inside the backticks are literal, so the stripped content is used as-is. *)
     backtickedQ[text], Cell[BoxData @ linkButton[StringTake[text, {2, -2}], url], "InlineFormula"],
-    (* a plain label is an ordinary prose hyperlink *)
-    True, linkButton[text, url]
+    (* a plain label is an ordinary prose hyperlink; markdown's \<punct> escapes
+       in the label (e.g. "[Wolfram\`Parser\`](paclet:...)") unescape before the
+       ButtonBox so the displayed text doesn't keep the literal backslashes. *)
+    True, linkButton[unescapeMarkdownPunctuation[text], url]
 ]
 
 (* the ref-page URI a bare symbol name resolves to: a name in the documented
@@ -1822,34 +2345,69 @@ usageCell[rawUsage_String] := Block[{
     ]
 ]
 
-(* a GitHub-flavored table -> a GridBox with gridlines (the palette's Insert
-   Custom Table). Header row is bold; short rows are padded to the column count;
-   each cell's text gets the usual inline formatting. *)
+(* a GitHub-flavored pipe table -> the same GridBox the palette inserts via
+   "Insert Custom Table" / "2 Column" / "3 Column": outer style
+   NColumnTableMod, with each row prefixed by a fixed Cell["      ", "ModInfo"]
+   placeholder (the narrow modification-indicator column, always whitespace -
+   NOT a slot for col-1 content) and the N content cells styled TableText.
+   The cell style supplies dividers / alignment / spacing, so no inline
+   GridBox options are needed. ONLY emitted when the document is a paclet
+   documentation page (Symbol / Guide / TechNote / Overview), where the
+   stylesheet defines 2ColumnTableMod / 3ColumnTableMod / ModInfo / TableText.
+   The resource definition-notebook stylesheets (FunctionResource / Paclet /
+   Example / Data / Prompt / Demonstration / LLMTool) do NOT define those
+   styles - rendering an *TableMod cell there leaks unstyled / wrong-looking
+   tables. For those templates we fall through to the generic GridBox path
+   with the TableNotes / Text cell wrapper that has always shipped. *)
+$tableModTemplates = {"Symbol", "Guide", "TechNote", "Overview", "Chapter", "BookChapter", "ComputationalEssay", "Essay", "Default"}
+
+tableModStyleFor[2] /; MemberQ[$tableModTemplates, $docTemplate] := "2ColumnTableMod"
+tableModStyleFor[3] /; MemberQ[$tableModTemplates, $docTemplate] := "3ColumnTableMod"
+tableModStyleFor[_] := None
+
+modInfoPlaceholder = Cell["      ", "ModInfo"];
+
+tableModRow[cells_List, ncol_Integer, opts___] := Prepend[
+    Cell[TextData @ inlineTextData[#], "TableText", opts] & /@ PadRight[cells, ncol, ""],
+    modInfoPlaceholder
+]
+
+(* Fallback for templates / widths the palette has no *TableMod style for.
+   "TableNotes" is the table style the Function Repository / Paclet / Example
+   definition-notebook docked cells insert, and exists in those stylesheets.
+   The documentation stylesheets (Symbol / Guide / TechNote) and Default.nb
+   do not define it, so a "TableNotes" cell renders unstyled / cramped there
+   - switch to "Text" for those, which exists everywhere. *)
 tableCellBox[text_String, opts___] := Cell[TextData @ inlineTextData[text], "TableText", opts]
 
 tableGridRow[cells_List, ncol_Integer, opts___] :=
     tableCellBox[#, opts] & /@ PadRight[cells, ncol, ""]
 
-(* "TableNotes" is the table style the Function Repository / Paclet / Example
-   definition-notebook docked cells insert, and exists in those stylesheets. The
-   documentation stylesheets (Symbol / Guide / TechNote) and Default.nb do not
-   define it, so a "TableNotes" cell renders unstyled / cramped there - switch to
-   "Text" for those, which exists everywhere. *)
 $tableCellStyleFor := If[MemberQ[{"FunctionResource", "Paclet", "Example", "Data", "Prompt", "Demonstration"}, $docTemplate], "TableNotes", "Text"]
 
-(* a pipe table renders as a styled GridBox with horizontal row dividers, a bold
-   header row, and a bit of padding. The grid options are repeated inline so the
-   table reads correctly whichever cell style is used. *)
-tableCell[block_] := Block[{ncol = Length[block["Header"]], rows},
-    rows = Join[
-        {tableGridRow[block["Header"], ncol, FontWeight -> Bold]},
-        tableGridRow[#, ncol] & /@ block["Rows"]
-    ];
-    Cell[BoxData[GridBox[rows,
-        GridBoxAlignment -> {"Columns" -> {{Left}}, "Rows" -> {{Baseline}}},
-        GridBoxDividers -> {"Columns" -> {{None}}, "Rows" -> {{True}}},
-        GridBoxSpacings -> {"Columns" -> {{1.5}}, "Rows" -> {{0.7}}}
-    ]], $tableCellStyleFor]
+(* a pipe table renders as a *TableMod cell when the doc template's
+   stylesheet defines them (paclet documentation pages, ncol = 2 or 3);
+   otherwise (resource definition notebooks, or wider tables) it falls
+   through to a generic GridBox with inline dividers and the
+   $tableCellStyleFor-picked outer cell style. *)
+tableCell[block_] := Block[{ncol = Length[block["Header"]], modStyle = tableModStyleFor[Length[block["Header"]]], rows},
+    If[modStyle =!= None,
+        rows = Join[
+            {tableModRow[block["Header"], ncol, FontWeight -> Bold]},
+            tableModRow[#, ncol] & /@ block["Rows"]
+        ];
+        Cell[BoxData[GridBox[rows]], modStyle]
+        ,
+        rows = Join[
+            {tableGridRow[block["Header"], ncol, FontWeight -> Bold]},
+            tableGridRow[#, ncol] & /@ block["Rows"]
+        ];
+        Cell[BoxData[GridBox[rows,
+            GridBoxAlignment -> {"Columns" -> {{Left}}, "Rows" -> {{Baseline}}},
+            GridBoxDividers -> {"Columns" -> {{None}}, "Rows" -> {{True}}},
+            GridBoxSpacings -> {"Columns" -> {{1.5}}, "Rows" -> {{0.7}}}
+        ]], $tableCellStyleFor]
+    ]
 ]
 
 (* an inlined markdown image (![alt](path "title")) -> an image cell. The title is
@@ -1866,13 +2424,6 @@ imageCell[block_] := With[{title = StringTrim @ Lookup[block, "Effect", ""]},
             Cell[BoxData[ToBoxes @ block["Image"]], title],
         True,
             Cell[BoxData[ToBoxes @ block["Image"]], "Output"]
-    ]
-]
-
-docExampleCells[sections_] := Block[{cells = sectionCells[sections, "basic examples"], counter = 0},
-    Catenate @ Map[
-        block |-> (counter += 1; exampleIOFor[block, counter]),
-        cells
     ]
 ]
 
@@ -1919,9 +2470,13 @@ setDocMetadata[Notebook[cells_, o : OptionsPattern[]], meta_, type_String] := Bl
     Notebook[cells, TaggingRules -> tr, Sequence @@ DeleteCases[opts, _[TaggingRules, _]]]
 ]
 
-(* markdown example-taxonomy sections -> the symbol page's ExampleSection titles *)
+(* markdown example-taxonomy sections -> the symbol page's ExampleSection titles
+   ("Requirements" is NOT an ExampleSection on the Symbol template - it only
+   surfaces on FunctionResource / Paclet via examplesSlot / exampleNotebookSlot,
+   which generate fresh Subsection cells per $exampleOrder entry.) *)
 $extendedTitles = <|
     "scope" -> "Scope",
+    "generalizations & extensions" -> "Generalizations & Extensions",
     "options" -> "Options",
     "applications" -> "Applications",
     "properties and relations" -> "Properties & Relations",
@@ -1953,14 +2508,27 @@ fillExtendedExamples[nb_, sections_] := Block[{content},
     }
 ]
 
-symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"], nb, name, usage, notes, basicText, basicCells},
+symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"], nb, name, usagePairs, notes, basicCells, raw},
     nb = docTemplate["FunctionBaseTemplateExt.nb"];
     name = Lookup[meta, "Name", ""];
-    usage = rawSectionText[sections, "usage"];
+    (* one Usage cell for the whole ## Usage section - the palette's Double
+       Usage Line recipe (Cell[..., "Usage"] containing ModInfo + InlineFormula
+       + text per usage line, all lines separated by "\n" inside the single
+       cell). The Symbol template ships with a single Usage placeholder cell;
+       replace it. Fall back to a whole-text usageCell when the prose does
+       not parse into signature+description pairs (e.g. no recognisable head
+       before the args). *)
+    usagePairs = Flatten[
+        usageStatement /@ Cases[Lookup[sections, "usage", {}], b_ /; b["Type"] === "Prose" :> b["Text"]],
+        1
+    ];
     notes = detailsCells[sections];
     nb = fillDocString[nb, "ObjectName", name];
-    If[ usage =!= "",
-        nb = nb /. Cell[_, "Usage", ___] :> usageCell[usage]
+    Which[
+        usagePairs =!= {},
+            nb = nb /. Cell[_, "Usage", ___] :> usageMultiCell[usagePairs],
+        (raw = rawSectionText[sections, "usage"]) =!= "",
+            nb = nb /. Cell[_, "Usage", ___] :> usageCell[raw]
     ];
     If[ notes =!= {},
         nb = nb /. Cell[_, "Notes", ___] :> Sequence @@ notes
@@ -1969,13 +2537,18 @@ symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"]
     If[ KeyExistsQ[meta, "Context"],
         nb = nb /. Cell[_, "ExampleInitialization", o___] :> Cell[BoxData[inputBoxes["Needs[\"" <> meta["Context"] <> "\"]"]], "ExampleInitialization", o]
     ];
-    basicText = rawSectionText[sections, "basic examples"];
-    basicCells = Join[
-        If[basicText === "", {}, {Cell[TextData @ inlineTextData[basicText], "ExampleText"]}],
-        docExampleCells[sections]
-    ];
+    (* walk Basic Examples block-by-block so per-cell `:`-terminated
+       captions become ExampleText cells, `---` thematic breaks become
+       ExampleDelimiter cells (resetting the In[]/Out[] counter), and
+       `### Heading` becomes an ExampleSubsection - the same authoring
+       contract docs/examples.md states for every example section. The
+       extended sections (Scope/Options/...) already go through
+       exampleContent; the Symbol template's Basic Examples slot used to
+       flatten via rawSectionText + docExampleCells, which dropped all
+       of that structure (see issue #3). *)
+    basicCells = exampleContent[Lookup[sections, "basic examples", {}], "ExampleText"];
     (* the base template leaves PrimaryExamplesSection empty for the author;
-       insert the basic example right after its header *)
+       insert the basic examples right after its header *)
     If[ basicCells =!= {},
         nb = nb /. Cell[ph_, "PrimaryExamplesSection", o___] :> Sequence[Cell[ph, "PrimaryExamplesSection", o], Sequence @@ basicCells]
     ];
@@ -2075,7 +2648,7 @@ tutorialBody[blocks_] := Block[{counter = 0},
             "Quote", {quoteCell[block["Text"]]},
             "MathBlock", {mathBlockCell[block["Text"]]},
             "Image", {imageCell[block]},
-            "Code", If[executableQ[block], (counter += 1; exampleIOFor[block, counter]), withCellFlag[block, {Cell[block["Code"], "Program"]}]],
+            "Code", If[executableQ[block], (counter += 1; exampleIOFor[block, counter]), withCellFlag[block, {nonExecutableCell[block]}]],
             _, {}
         ],
         blocks
@@ -2181,22 +2754,31 @@ tocCell[content_, style_String] := Cell[
    from the frontmatter "Name:" key and is filled into the template's
    single TOCDocumentTitle cell separately, so emitting another body cell
    of the same style would duplicate the title. *)
-overviewBodyCells[blocks_, paclet_String] := Block[{out = {}, parentDepth = 1},
-    Scan[
-        block |-> Switch[block["Type"],
-            "Heading", If[block["Level"] >= 2,
-                AppendTo[out, tocCell[tocCellContent[block["Text"], paclet], tocStyleFor[block["Level"]]]];
-                parentDepth = block["Level"]
-            ],
-            "List", Scan[
-                AppendTo[out, tocCell[tocCellContent[#, paclet], tocStyleFor[parentDepth + 1]]] &,
-                block["Items"]
-            ],
-            _, Null
-        ],
-        blocks
-    ];
-    out
+(* Fold threads the parent-heading depth through the block walk: each step
+   sees the running depth and the cells emitted so far, and returns the
+   updated pair. The result is a single allocation - no AppendTo growing a
+   list one element at a time. *)
+overviewBodyCells[blocks_, paclet_String] := Last @ Fold[
+    Function[{state, block},
+        Block[{depth = First[state], cells = Last[state], lvl},
+            Switch[block["Type"],
+                "Heading",
+                    lvl = block["Level"];
+                    If[ lvl >= 2,
+                        {lvl, Append[cells, tocCell[tocCellContent[block["Text"], paclet], tocStyleFor[lvl]]]},
+                        {depth, cells}
+                    ],
+                "List",
+                    {depth, Join[cells, Map[
+                        tocCell[tocCellContent[#, paclet], tocStyleFor[depth + 1]] &,
+                        block["Items"]
+                    ]]},
+                _, state
+            ]
+        ]
+    ],
+    {1, {}},
+    blocks
 ]
 
 (* Group a flat sequence of TOC cells into the nested CellGroupData tree the
@@ -2207,7 +2789,7 @@ $tocDepthOf = <|
     "TOCDocumentTitle" -> 0, "TOCChapter" -> 1, "TOCSection" -> 2,
     "TOCSubsection" -> 3, "TOCSubsubsection" -> 4, "TOCSubsubsubsection" -> 5
 |>
-groupTocCells[cells_List] := Block[{stack = {{}}, depths = {-1}, finalize, push},
+groupTocCells[cells_List] := Block[{stack = {{}}, depths = {-1}, finalize},
     finalize[] := Block[{kids = First[stack], parentKids, headWithKids},
         stack = Rest[stack]; depths = Rest[depths];
         If[kids =!= {} && Length[stack] > 0,
@@ -2243,8 +2825,14 @@ overviewNotebook[data_] := Block[{
         Cell[If[title === "", "XXXX", title], "TOCDocumentTitle", o];
     tocCells = overviewBodyCells[blocks, paclet];
     tocBlocks = groupTocCells[tocCells];
-    nb = nb /. Cell[CellGroupData[{title : Cell[_, "TOCDocumentTitle", ___], _Cell | _ ..}, st_], go___] :>
-        Cell[CellGroupData[Prepend[tocBlocks, title], st], go];
+    (* Force the title group's state to Open. The empty
+       OverviewBaseTemplateExt.nb wraps its whole TOC in
+       CellGroupData[..., Closed] (the author opens the title once and starts
+       authoring), but a generated overview's body IS the content the reader
+       is meant to see - leaving it Closed hides the entire TOC behind a
+       click on the title. *)
+    nb = nb /. Cell[CellGroupData[{titleCell : Cell[_, "TOCDocumentTitle", ___], _Cell | _ ..}, _], go___] :>
+        Cell[CellGroupData[Prepend[tocBlocks, titleCell], Open], go];
     nb = fillDocList[nb, "Keywords", asList @ Lookup[meta, "Keywords", {}]];
     nb = nb /. {
         Cell["XXXX", _, ___] :> Nothing,
@@ -2272,7 +2860,7 @@ defaultNotebook[data_] := Block[{counter = 0, cells},
             "Code",
                 If[ executableQ[block],
                     (counter += 1; exampleIOFor[block, counter]),
-                    withCellFlag[block, {Cell[block["Code"], "Program"]}]
+                    withCellFlag[block, {nonExecutableCell[block]}]
                 ],
             _, {}
         ],
@@ -2344,7 +2932,7 @@ $essayTemplate := $essayTemplate = Replace[
 ]
 
 essayNotebook[data_] := Block[{meta = data["meta"], counter = 0, header, body,
-    templateOpts = If[Head[$essayTemplate] === Notebook, Rest[List @@ $essayTemplate],
+    templateOpts = If[MatchQ[$essayTemplate, _Notebook], Rest[List @@ $essayTemplate],
         {StyleDefinitions -> "Default.nb"}]},
     header = essayHeaderCells[meta];
     body = Catenate @ MapIndexed[
@@ -2369,7 +2957,7 @@ essayNotebook[data_] := Block[{meta = data["meta"], counter = 0, header, body,
                     "Code",
                         If[ executableQ[block],
                             counter += 1; exampleIOFor[block, counter],
-                            withCellFlag[block, {Cell[block["Code"], "Program"]}]
+                            withCellFlag[block, {nonExecutableCell[block]}]
                         ],
                     _, {}
                 ]
@@ -2391,11 +2979,34 @@ rawSlotValue[name_String, opts_List, meta_] := Block[{def = FirstCase[opts, (Def
         "PacletDirectoryType", If[MissingQ[def], "Notebook", def],
         "Context", Lookup[meta, "Context", If[MissingQ[def], "MyPublisherID`MyPaclet`", def]],
         "MainGuidePageString", Lookup[meta, "MainGuide", def],
-        (* the license radio is selected by the cell's "RadioButtonValue" tagging
-           rule, which is the license ID *string* (e.g. "MIT"); the serialized
-           CheckboxData blob is left untouched (Checked stays {}). *)
-        "SelectedLicenseID", If[KeyExistsQ[meta, "License"], meta["License"], def],
-        "SpecifiedLicenseID", def,
+        (* The Paclet template's license control is a radio group with five
+           known IDs ("MIT", "Apache-2.0", "CC0-1.0", "None", "Other") plus a
+           free-text input that activates when "Other" is the selected radio.
+           Frontmatter License: <something> can be any of:
+           - a known-radio ID (MIT / Apache-2.0 / CC0-1.0 / None / Other)
+             -> SelectedLicenseID picks that radio, SpecifiedLicenseID stays
+             at the template's default;
+           - any other string (e.g. "GPL-3.0-or-later", "BSD-3-Clause", a
+             custom phrasing) -> SelectedLicenseID points at the "Other"
+             radio and SpecifiedLicenseID carries the verbatim string, so
+             the free-text input fills correctly in the FE.
+           Without the second branch a non-radio License silently vanishes:
+           SelectedLicenseID gets a string no radio matches (none lights up)
+           and SpecifiedLicenseID is left at its default Null. *)
+        "SelectedLicenseID", If[
+            KeyExistsQ[meta, "License"],
+            If[ MatchQ[meta["License"], "MIT" | "Apache-2.0" | "CC0-1.0" | "None" | "Other"],
+                meta["License"],
+                "Other"
+            ],
+            def
+        ],
+        "SpecifiedLicenseID", Block[{lic = Lookup[meta, "License", Missing[]]},
+            If[ StringQ[lic] && ! MatchQ[lic, "MIT" | "Apache-2.0" | "CC0-1.0" | "None" | "Other"],
+                lic,
+                def
+            ]
+        ],
         _, Lookup[meta, name, def]
     ]
 ]
@@ -2413,6 +3024,36 @@ resolveTemplateExpressions[template_, meta_] := template /. te : (_TemplateExpre
 (* resource definition notebooks (Function Repository, Paclet Repository): fill
    the official template's slots and keep everything else (stylesheet + docked
    Deploy/Submit toolbar) intact, so the .nb is publishable as-is. *)
+(* Paclet template's nine canonical disclosure checkboxes.  Each appears in
+   the produced notebook as a standalone CheckboxBox[False, {False, name}]
+   whose `name` is one of these tags; ticking it switches the current value
+   from False to the tag string ({False, tag} is the {off, on} pair).  The
+   resource system's CheckboxesCell autofails on Property -> "Disclosures",
+   so unlike Categories / CompatibilityFeatures these are filled by
+   walking the template and flipping the matching boxes individually.
+   Authors set them via a frontmatter list: Disclosures: [LocalFiles,
+   ExternalServices].  Unknown names are silently ignored. *)
+$pacletDisclosureNames = {
+    "LocalFiles", "ExternalServices", "LocalSystemInteractions",
+    "OSConfiguration", "PacletDependencies", "WLSystemConfiguration",
+    "WLSystemSymbols", "WolframAccount", "Other"
+}
+
+applyPacletDisclosures[nb_, meta_Association] := With[{
+    want = Intersection[
+        asList @ Lookup[meta, "Disclosures", {}],
+        $pacletDisclosureNames
+    ]
+},
+    If[ want === {},
+        nb,
+        nb /. Verbatim[CheckboxBox][False, {False, tag_String}] /; MemberQ[want, tag] :>
+            CheckboxBox[tag, {False, tag}]
+    ]
+]
+applyPacletDisclosures[other_, _] := other
+
+
 resourceNotebook[resourceType_String, data0_] := Block[{template, data = Append[data0, "resourceType" -> resourceType]},
     Needs["DefinitionNotebookClient`"];
     template = DefinitionNotebookClient`DefinitionTemplate[resourceType];
@@ -2426,6 +3067,11 @@ resourceNotebook[resourceType_String, data0_] := Block[{template, data = Append[
     (* ReplaceRepeated: some slots (e.g. the Compatibility group) nest sub-slots
        inside their DefaultValue, which a single pass would not reach. *)
     template = template //. TemplateSlot[n_, o___] :> Sequence @@ fillSlot[n, {o}, data];
+    (* "Disclosures: [list]" frontmatter toggles the named Paclet disclosure
+       checkboxes (see applyPacletDisclosures); a no-op for templates whose
+       Disclosures section has no such checkboxes, or for documents that
+       omit the frontmatter key. *)
+    template = applyPacletDisclosures[template, data["meta"]];
     (* the template seeds a blank standalone usage-input placeholder beside the
        Usage slot (for a second usage line); we fill all usage from the markdown,
        so drop any UsageInputs cell with no real content (matched by emptiness,
@@ -2443,6 +3089,656 @@ resourceNotebook[resourceType_String, data0_] := Block[{template, data = Append[
         Notebook[cells, LightDark -> "Light", Sequence @@ FilterRules[{o}, Except[LightDark]]]]
 ]
 
+(* === Template: Chapter (Wolfram Book Tools) ===
+   A chapter notebook in the WolframBookTools sense: one Section heading
+   (with CounterAssignments -> {{"Section", n-1}, ...}), then body blocks
+   in the BookToolsStyles vocabulary. The H1 of the markdown is the chapter
+   title; the frontmatter "ChapterNumber:" sets the counter. H2 headings
+   are Subsection by default, but a fixed set of reserved titles
+   (Summary / Vocabulary / Exercises / Q&A / Tech Notes / More to Explore
+   / References / Takeaways / Resources / Key Concepts) drop the block
+   that follows them into the matching book-style back-matter section
+   instead. Multi-cell scaffolds that have no direct markdown analogue
+   (SolvedExample, Theorem/Proof, Exercise/Solution) are authored as
+   Pandoc-style ":::" fenced divs - see docs/book-palette.md for the full
+   markdown <-> cell-style mapping. *)
+
+$bookStyleSheet := FrontEnd`FileName[{"Wolfram"}, "BookToolsStyles.nb",
+    CharacterEncoding -> "UTF-8"]
+
+(* heading levels inside a chapter notebook: H2..H5 -> Subsection..Sub^4section.
+   H1 is reserved for the chapter title (rendered as the Section cell). *)
+$chapterHeadingStyle = <|
+    2 -> "Subsection",
+    3 -> "Subsubsection",
+    4 -> "Subsubsubsection",
+    5 -> "Subsubsubsubsection"
+|>
+
+(* H2 titles that select a named back-matter section style (case-insensitive,
+   trimmed). The value is the SectionStyle plus the body-cell context the
+   section renders in. *)
+$reservedH2 = <|
+    "summary"               -> "Summary",
+    "vocabulary"            -> "Vocabulary",
+    "vocab"                 -> "Vocabulary",
+    "key concepts"          -> "KeyConcepts",
+    "key terms"             -> "KeyConcepts",
+    "exercises"             -> "Exercises",
+    "exercise"              -> "Exercises",
+    "q&a"                   -> "QA",
+    "q & a"                 -> "QA",
+    "q and a"               -> "QA",
+    "questions"             -> "QA",
+    "questions and answers" -> "QA",
+    "tech notes"            -> "TechNotes",
+    "technical notes"       -> "TechNotes",
+    "more to explore"       -> "MoreExplore",
+    "more"                  -> "MoreExplore",
+    "further reading"       -> "MoreExplore",
+    "references"            -> "References",
+    "bibliography"          -> "References",
+    "resources"             -> "Resources",
+    "takeaways"             -> "Takeaways",
+    "key points"            -> "Takeaways"
+|>
+
+reservedSectionKindOf[heading_String] := Lookup[$reservedH2,
+    ToLowerCase[StringTrim[heading]], None]
+
+(* the chapter's Section heading: the canonical "<counter> | <title>" shape the
+   palette's New Chapter dialog writes (CounterBox + SectionBar separator +
+   title), with CounterAssignments resetting Section / Subsection /
+   Subsubsection / Exercise counters at the start of the chapter. *)
+chapterSectionCell[title_String, num_Integer] := Cell[
+    TextData[Join[
+        {CounterBox["Section"], StyleBox[" | ", "SectionBar"]},
+        inlineTextData[title]
+    ]],
+    "Section",
+    CounterAssignments -> {
+        {"Section", num - 1}, {"Subsection", 0},
+        {"Subsubsection", 0}, {"Exercise", 0}
+    }
+]
+chapterSectionCell[title_String, _] := Cell[
+    TextData[Join[{StyleBox[" | ", "SectionBar"]}, inlineTextData[title]]],
+    "Section"
+]
+
+(* a normal Input/Output pair re-styled to a given pair of styles (e.g.
+   ExerciseInput/ExerciseOutput, SolvedExampleInput/SolvedExampleOutput,
+   TechNoteInput/TechNoteOutput). Mirrors exampleIO but with custom styles
+   and without numbered In[]/Out[] labels - the book style sheets don't
+   carry those for the alt code styles. *)
+styledIOCells[block_, inStyle_String, outStyle_String] := Block[{
+    outBoxes = Lookup[block, "OutputBoxes", Missing[]],
+    code = block["Code"], inCell, outCell,
+    msgs = Lookup[block, "Messages", {}],
+    prints = Lookup[block, "Prints", {}]
+},
+    inCell = Cell[BoxData[inputBoxes[code]], inStyle];
+    Which[
+        MissingQ[outBoxes] || outBoxes === Null,
+            Flatten[{inCell, asPrintCell /@ prints, messageCell /@ msgs}],
+        True,
+            outCell = Cell[BoxData[outBoxes], outStyle];
+            {Cell[CellGroupData[
+                Flatten[{inCell, asPrintCell /@ prints, messageCell /@ msgs, outCell}],
+                Open
+            ]]}
+    ]
+]
+
+(* "free-form" body cells - the cells produced inside an ordinary subsection
+   (i.e. one whose H2 isn't a reserved back-matter title), or inside the
+   chapter's introduction (the prose between the chapter heading and the
+   first H2). Mirrors defaultNotebook's per-block dispatch with book styles
+   substituted (Item/Subitem nested by list depth, CodeText for a colon-
+   ending prose line preceding an Input). The "counter" reference is shared
+   with the rest of the chapter (each evaluated Input gets the next In[n] /
+   Out[n] number, increasing through the whole notebook). *)
+$bookListLevel = 1
+$bookListStyle[1] = "Item"
+$bookListStyle[2] = "Subitem"
+$bookListStyle[_] = "Subsubitem"
+
+bookProseCell[block_, nextBlockType_String] := Block[{text = block["Text"]},
+    If[StringEndsQ[StringTrim[text], ":"] &&
+        ! StringContainsQ[text, "\n"] && nextBlockType === "Code",
+        Cell[TextData @ inlineTextData[text], "CodeText"],
+        Cell[TextData @ inlineTextData[text], "Text"]
+    ]
+]
+
+(* free-form (subsection-level) cell from a block. `next` is the type of the
+   following block (used to decide CodeText vs Text for caption-like prose). *)
+bookFreeCells[block_, next_String, counterSym_] := Switch[block["Type"],
+    "Heading",
+        {Cell[headingText[block["Text"]],
+            Lookup[$chapterHeadingStyle, block["Level"], "Subsubsubsection"]]},
+    "Prose",
+        {bookProseCell[block, next]},
+    "List",
+        listItemCells[block, "Item"],
+    "Table",
+        {tableCell[block]},
+    "Quote",
+        {quoteCell[block["Text"]]},
+    "MathBlock",
+        {mathBlockCell[block["Text"]]},
+    "Image",
+        {imageCell[block]},
+    "Code",
+        If[ executableQ[block],
+            $chapterCounter += 1;
+            exampleIOFor[block, $chapterCounter],
+            withCellFlag[block, {nonExecutableCell[block]}]
+        ],
+    "Div",
+        bookDivCells[block, counterSym],
+    "Separator",
+        {Cell["", "ExampleDelimiter"]},
+    _, {}
+]
+
+(* the fenced-div dispatch: each ::: kind opens one of the Book Tools
+   multi-cell scaffolds. Kinds we handle: solved-example, theorem,
+   theorem-numbered, proof, exercise, solution. Anything else falls back to
+   rendering the inner blocks as plain free-form cells. *)
+bookDivCells[block_, counterSym_] := Block[{
+    kind = ToLowerCase[StringTrim[StringReplace[block["Kind"], "_" -> "-"]]],
+    inner = block["Blocks"]
+},
+    Switch[kind,
+        "solved-example",       solvedExampleCells[inner, counterSym, False],
+        "solved-example-numbered", solvedExampleCells[inner, counterSym, True],
+        "theorem",              theoremCells[inner, counterSym, False],
+        "theorem-numbered",     theoremCells[inner, counterSym, True],
+        "proof",                proofCells[inner, counterSym, False],
+        "proof-numbered",       proofCells[inner, counterSym, True],
+        "exercise",             exerciseDivCells[inner, counterSym],
+        "solution",             solutionDivCells[inner, counterSym],
+        _,
+            Flatten[Map[
+                bookFreeCells[#, "", counterSym] &,
+                inner
+            ]]
+    ]
+]
+
+(* SolvedExample scaffold. The first non-code inner block is the lead-in
+   that becomes the SolvedExampleNote, the inner ``wl`` blocks become
+   SolvedExampleInput / SolvedExampleOutput, and any inner display math
+   becomes SolvedExampleDisplayFormula(Numbered). A SolvedExampleEndCap
+   terminates the group. If `numbered`, the heading carries CounterBox
+   counters; otherwise it's just titled "Solved Example" plus the lead-in. *)
+solvedExampleCells[inner_List, counterSym_, numbered_] := Block[{
+    headBlock, restBlocks, headTextData, headCell
+},
+    {headBlock, restBlocks} = If[
+        inner =!= {} && First[inner]["Type"] === "Prose",
+        {First[inner], Rest[inner]},
+        {<|"Type" -> "Prose", "Text" -> "Solved Example"|>, inner}
+    ];
+    headTextData = If[numbered,
+        Join[inlineTextData[headBlock["Text"] <> " "],
+            {CounterBox["Section"], ".", CounterBox["SolvedExample"]}],
+        inlineTextData[headBlock["Text"]]
+    ];
+    headCell = Cell[TextData[headTextData], "SolvedExample"];
+    Join[
+        {headCell},
+        Flatten @ Map[bookSolvedInnerCells[#, counterSym] &, restBlocks],
+        {Cell["", "SolvedExampleEndCap"]}
+    ]
+]
+
+bookSolvedInnerCells[block_, counterSym_] := Switch[block["Type"],
+    "Prose",
+        {Cell[TextData @ inlineTextData[block["Text"]], "SolvedExampleNote"]},
+    "Code",
+        If[ executableQ[block],
+            styledIOCells[block, "SolvedExampleInput", "SolvedExampleOutput"],
+            {Cell[block["Code"], "SolvedExampleInput"]}
+        ],
+    "MathBlock",
+        With[{nm = Lookup[block, "Numbered", False]},
+            {Cell[BoxData[PaneBox[
+                Replace[texBoxes[block["Text"]], $Failed ->
+                    FormBox[inputBoxes[block["Text"]], TraditionalForm]],
+                ImageSize -> Full, Alignment -> Center]],
+                If[TrueQ[nm], "SolvedExampleDisplayFormulaNumbered",
+                    "SolvedExampleDisplayFormula"]]}
+        ],
+    "List",
+        listItemCells[block, "Item"],
+    _, bookFreeCells[block, "", counterSym]
+]
+
+(* Theorem scaffold: a Theorem heading (with CounterBox counters when
+   numbered), then a TheoremStatement (the first prose paragraph if any),
+   then any further inner blocks rendered as free-form cells. The
+   ProofTheoremEndCap terminates the group only when nested under a Proof. *)
+theoremCells[inner_List, counterSym_, numbered_] := Block[{
+    headBlock, restBlocks, headTextData, headCell, statementCell, rest
+},
+    {headBlock, restBlocks} = If[
+        inner =!= {} && First[inner]["Type"] === "Prose",
+        {First[inner], Rest[inner]},
+        {<|"Type" -> "Prose", "Text" -> "Theorem"|>, inner}
+    ];
+    headTextData = If[numbered,
+        Join[inlineTextData[headBlock["Text"] <> " "],
+            {CounterBox["Section"], ".", CounterBox["Subsection"]}],
+        inlineTextData[headBlock["Text"]]
+    ];
+    headCell = Cell[TextData[headTextData], "Theorem"];
+    (* split the statement cell out of restBlocks without using a multi-
+       assignment - {Nothing, x} would auto-collapse to {x} and break Set. *)
+    If[restBlocks =!= {} && First[restBlocks]["Type"] === "Prose",
+        statementCell = Cell[TextData @ inlineTextData[First[restBlocks]["Text"]],
+            "TheoremStatement"];
+        rest = Rest[restBlocks]
+    ,
+        statementCell = Nothing;
+        rest = restBlocks
+    ];
+    Join[{headCell, statementCell},
+        Flatten @ Map[bookFreeCells[#, "", counterSym] &, rest]]
+]
+
+proofCells[inner_List, counterSym_, numbered_] := Block[{contentCells},
+    contentCells = Flatten @ Map[bookProofInnerCells[#, counterSym] &, inner];
+    Join[{Cell["Proof", "Proof"]}, contentCells,
+        {Cell["", "ProofTheoremEndCap"]}]
+]
+
+bookProofInnerCells[block_, counterSym_] := Switch[block["Type"],
+    "Prose",
+        {Cell[TextData @ inlineTextData[block["Text"]], "ProofContent"]},
+    "MathBlock",
+        {Cell[BoxData[PaneBox[
+            Replace[texBoxes[block["Text"]], $Failed ->
+                FormBox[inputBoxes[block["Text"]], TraditionalForm]],
+            ImageSize -> Full, Alignment -> Center]],
+            "ProofTheoremDisplayFormula"]},
+    _, bookFreeCells[block, "", counterSym]
+]
+
+(* one Exercise. The first prose line becomes the Exercise prompt cell;
+   subsequent prose/code/list/math blocks render in the Exercise context
+   (paragraphs -> ExerciseNote, ``wl`` -> ExerciseInput/ExerciseOutput).
+   A nested ::: solution div opens the ExerciseSolution group. *)
+exerciseDivCells[inner_List, counterSym_] := Block[{
+    promptBlock, rest, promptCell
+},
+    {promptBlock, rest} = If[
+        inner =!= {} && First[inner]["Type"] === "Prose",
+        {First[inner], Rest[inner]},
+        {<|"Type" -> "Prose", "Text" -> "Exercise"|>, inner}
+    ];
+    promptCell = Cell[TextData @ inlineTextData[promptBlock["Text"]],
+        "Exercise"];
+    Prepend[
+        Flatten @ Map[bookExerciseInnerCells[#, counterSym] &, rest],
+        promptCell
+    ]
+]
+
+bookExerciseInnerCells[block_, counterSym_] := Switch[block["Type"],
+    "Prose",
+        {Cell[TextData @ inlineTextData[block["Text"]], "ExerciseNote"]},
+    "Code",
+        If[ executableQ[block],
+            styledIOCells[block, "ExerciseInput", "ExerciseOutput"],
+            {Cell[block["Code"], "ExerciseInput"]}
+        ],
+    "List",
+        listItemCells[block, "Item"],
+    "MathBlock",
+        {mathBlockCell[block["Text"]]},
+    "Div",
+        If[ToLowerCase[StringTrim[block["Kind"]]] === "solution",
+            solutionDivCells[block["Blocks"], counterSym],
+            bookDivCells[block, counterSym]
+        ],
+    _, bookFreeCells[block, "", counterSym]
+]
+
+solutionDivCells[inner_List, counterSym_] := Join[
+    {Cell["Solution", "ExerciseSolution"]},
+    Flatten @ Map[bookSolutionInnerCells[#, counterSym] &, inner]
+]
+
+bookSolutionInnerCells[block_, counterSym_] := Switch[block["Type"],
+    "Prose",
+        {Cell[TextData @ inlineTextData[block["Text"]], "SolutionAnswer"]},
+    "Code",
+        If[ executableQ[block],
+            styledIOCells[block, "ExerciseInput", "ExerciseOutput"],
+            {Cell[block["Code"], "ExerciseInput"]}
+        ],
+    "List",
+        Map[Cell[TextData @ inlineTextData[#], "SolutionItem"] &,
+            block["Items"]],
+    _, bookFreeCells[block, "", counterSym]
+]
+
+(* === reserved back-matter sections === *)
+
+(* group consecutive blocks under H2 boundaries. Returns a list of
+   {<heading or None>, {blocks}} pairs. The first group has heading None
+   if there is intro content before the first H2; subsequent groups carry
+   their H2 heading block as the first element. *)
+groupByH2[blocks_List] := Block[{groups = {}, current = None, currentBlocks = {}, finalize},
+    finalize[h_, bs_] := AppendTo[groups, {h, bs}];
+    Do[
+        If[b["Type"] === "Heading" && b["Level"] === 2,
+            finalize[current, currentBlocks];
+            current = b; currentBlocks = {},
+            AppendTo[currentBlocks, b]
+        ],
+        {b, blocks}
+    ];
+    finalize[current, currentBlocks];
+    DeleteCases[groups, {None, {}}]
+]
+
+(* Summary section: heading -> SummarySection; paragraphs -> SummaryNote;
+   bullets -> SummaryList. *)
+summarySectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Prose", {Cell[TextData @ inlineTextData[b["Text"]], "SummaryNote"]},
+            "List",  listItemCells[b, "SummaryList"],
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "SummarySection"]
+]
+
+(* Vocabulary: a 2-column pipe table becomes a VocabularyTable GridBox;
+   anything else renders free-form (so subsection headings nested inside
+   vocab still work). *)
+vocabularyTableCellFromTable[block_] := Cell[
+    BoxData[GridBox[
+        Map[
+            row |-> {RowBox[{
+                row[[1]], " ",
+                Cell[row[[2]], "VocabularyText"]
+            }]},
+            block["Rows"]
+        ]
+    ]],
+    "VocabularyTable"
+]
+
+vocabularySectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Table",
+                {vocabularyTableCellFromTable[b]},
+            "Prose",
+                {Cell[TextData @ inlineTextData[b["Text"]], "Text"]},
+            "Heading",
+                {Cell[headingText[b["Text"]],
+                    Switch[b["Level"],
+                        3, "VocabularySubsection",
+                        4, "VocabularySubsubsection",
+                        _, "VocabularySubsection"]]},
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "VocabularySection"]
+]
+
+(* KeyConcepts: a "Key Concepts" / "Key Terms" H2 - renders the heading as
+   a regular Subsection and the bulleted list as plain Items (the EIWL-style
+   "things you'll learn" bullet list at the top of a chapter). *)
+keyConceptsSectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[bookFreeCells[#, "", counterSym] &, blocks],
+    Cell[headingText[heading["Text"]], "Subsection"]
+]
+
+(* Exercises: heading -> ExerciseSection; H3 -> ExerciseSubsection; each
+   "::: exercise" div is one Exercise group; bare ordered-list items
+   collapse to single-line Exercise cells. *)
+exercisesSectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Heading",
+                {Cell[headingText[b["Text"]],
+                    If[b["Level"] === 3, "ExerciseSubsection",
+                        Lookup[$chapterHeadingStyle, b["Level"],
+                            "Subsubsection"]]]},
+            "Prose",
+                {Cell[TextData @ inlineTextData[b["Text"]],
+                    "ExerciseSectionNote"]},
+            "List",
+                Map[Cell[TextData @ inlineTextData[#], "Exercise"] &,
+                    b["Items"]],
+            "Div",
+                bookDivCells[b, counterSym],
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "ExerciseSection"]
+]
+
+(* Q&A: heading -> QASection; paragraph that starts with Q. / Q: / Q -
+   trims that lead-in and becomes a Question; same for A. -> Answer.
+   Anything else falls through to a plain Text cell. *)
+qaProseCell[text_String] := Block[{trimmed = StringTrim[text]},
+    Which[
+        StringMatchQ[trimmed, ("Q." | "Q:" | "Q -" | "**Q.**" | "**Q:**") ~~ Whitespace ~~ ___],
+            Cell[TextData @ inlineTextData @ StringTrim @
+                StringReplace[trimmed,
+                    StartOfString ~~ ("**Q.**" | "**Q:**" | "Q." | "Q:" | "Q -") ~~ Whitespace -> ""],
+                "Question"],
+        StringMatchQ[trimmed, ("A." | "A:" | "A -" | "**A.**" | "**A:**") ~~ Whitespace ~~ ___],
+            Cell[TextData @ inlineTextData @ StringTrim @
+                StringReplace[trimmed,
+                    StartOfString ~~ ("**A.**" | "**A:**" | "A." | "A:" | "A -") ~~ Whitespace -> ""],
+                "Answer"],
+        True,
+            Cell[TextData @ inlineTextData[text], "Text"]
+    ]
+]
+
+qaSectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Prose", {qaProseCell[b["Text"]]},
+            "List",  listItemCells[b, "Item"],
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "QASection"]
+]
+
+(* Tech Notes: heading -> TechNoteSection; paragraphs -> TechNote; code ->
+   TechNoteInput/Output; list items -> TechNoteItem. *)
+techNotesSectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Prose", {Cell[TextData @ inlineTextData[b["Text"]], "TechNote"]},
+            "Code",
+                If[ executableQ[b],
+                    styledIOCells[b, "TechNoteInput", "TechNoteOutput"],
+                    {Cell[b["Code"], "TechNoteInput"]}
+                ],
+            "List",
+                Map[Cell[TextData @ inlineTextData[#], "TechNoteItem"] &,
+                    b["Items"]],
+            "MathBlock", {mathBlockCell[b["Text"]]},
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "TechNoteSection"]
+]
+
+(* More to Explore: heading -> MoreExploreSection; bullets -> MoreExplore;
+   bare-URL prose -> MoreExploreShortURL. *)
+moreExploreCell[text_String] := Cell[TextData @ inlineTextData[text],
+    If[StringMatchQ[StringTrim[text], ("http" ~~ ___) | ("wolfr.am/" ~~ ___)],
+        "MoreExploreShortURL", "MoreExplore"]
+]
+
+moreExploreSectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Prose", {moreExploreCell[b["Text"]]},
+            "List",
+                Map[Cell[TextData @ inlineTextData[#], "MoreExplore"] &,
+                    b["Items"]],
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "MoreExploreSection"]
+]
+
+(* References: heading -> ReferenceSection; bullets / paragraphs ->
+   Reference cells. *)
+referencesSectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Prose", {Cell[TextData @ inlineTextData[b["Text"]], "Reference"]},
+            "List",
+                Map[Cell[TextData @ inlineTextData[#], "Reference"] &,
+                    b["Items"]],
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "ReferenceSection"]
+]
+
+resourcesSectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Prose", {Cell[TextData @ inlineTextData[b["Text"]], "ResourcesText"]},
+            "List",
+                Map[Cell[TextData @ inlineTextData[#], "ResourcesText"] &,
+                    b["Items"]],
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "ResourcesSubsection"]
+]
+
+takeawaysSectionCells[heading_, blocks_, counterSym_] := Prepend[
+    Catenate @ Map[
+        b |-> Switch[b["Type"],
+            "Prose", {Cell[TextData @ inlineTextData[b["Text"]], "TakeawaysText"]},
+            "List",
+                Map[Cell[TextData @ inlineTextData[#], "TakeawaysText"] &,
+                    b["Items"]],
+            _, bookFreeCells[b, "", counterSym]
+        ],
+        blocks
+    ],
+    Cell[headingText[heading["Text"]], "TakeawaysSection"]
+]
+
+(* dispatch: given an H2 heading block (or None) plus its body blocks,
+   build the cells for that group. None means "intro content before the
+   first H2" - emit it as free-form cells. *)
+chapterGroupCells[None, blocks_, counterSym_] :=
+    Block[{next, out = {}},
+        Do[
+            next = If[i < Length[blocks], blocks[[i + 1]]["Type"], ""];
+            out = Join[out, bookFreeCells[blocks[[i]], next, counterSym]],
+            {i, Length[blocks]}
+        ];
+        out
+    ]
+chapterGroupCells[heading_Association, blocks_, counterSym_] := Block[{
+    kind = reservedSectionKindOf[heading["Text"]], next, out
+},
+    Switch[kind,
+        "Summary",      summarySectionCells[heading, blocks, counterSym],
+        "Vocabulary",   vocabularySectionCells[heading, blocks, counterSym],
+        "KeyConcepts",  keyConceptsSectionCells[heading, blocks, counterSym],
+        "Exercises",    exercisesSectionCells[heading, blocks, counterSym],
+        "QA",           qaSectionCells[heading, blocks, counterSym],
+        "TechNotes",    techNotesSectionCells[heading, blocks, counterSym],
+        "MoreExplore",  moreExploreSectionCells[heading, blocks, counterSym],
+        "References",   referencesSectionCells[heading, blocks, counterSym],
+        "Resources",    resourcesSectionCells[heading, blocks, counterSym],
+        "Takeaways",    takeawaysSectionCells[heading, blocks, counterSym],
+        _,
+            out = {Cell[headingText[heading["Text"]], "Subsection"]};
+            Do[
+                next = If[i < Length[blocks], blocks[[i + 1]]["Type"], ""];
+                out = Join[out, bookFreeCells[blocks[[i]], next, counterSym]],
+                {i, Length[blocks]}
+            ];
+            out
+    ]
+]
+
+(* `counterSym` is a Block-local symbol so the nested helpers can SetDelayed
+   on it (the value mutates as wl example cells get In[n]/Out[n] labels).
+   We carry it as an explicit argument through the section dispatchers so
+   each is closure-free. *)
+chapterNotebook[data_] := Block[{
+    meta = data["meta"], blocks = data["blocks"],
+    title, chapterNum, groups, bodyCells, $chapterCounter = 0, frontmatterOpts,
+    firstH1, contentBlocks
+},
+    (* Drop the H1 heading from the body: the chapter title is the Section
+       heading we emit ourselves, not a Subsection/.. inside the chapter.
+       Fall back to the H1 text for the title when Name: is absent. *)
+    firstH1 = SelectFirst[blocks,
+        # =!= Null && #["Type"] === "Heading" && #["Level"] === 1 &, Null];
+    contentBlocks = DeleteCases[blocks,
+        b_ /; AssociationQ[b] && b["Type"] === "Heading" && b["Level"] === 1];
+    title = Lookup[meta, "Name", Lookup[meta, "Title",
+        If[firstH1 =!= Null, firstH1["Text"], ""]]];
+    chapterNum = With[{n = Lookup[meta, "ChapterNumber", Missing[]]},
+        Which[
+            IntegerQ[n], n,
+            StringQ[n] && StringMatchQ[StringTrim[n], DigitCharacter ..],
+                ToExpression[StringTrim[n]],
+            True, Missing[]
+        ]
+    ];
+    (* a Title-style banner above the chapter heading - used only when a
+       Subtitle frontmatter key is set, to mimic the palette's optional
+       Subchapter cell. The chapter title itself always renders as the
+       Section heading. *)
+    groups = groupByH2[contentBlocks];
+    bodyCells = Catenate @ Map[
+        chapterGroupCells[#[[1]], #[[2]], $chapterCounter] &,
+        groups
+    ];
+    frontmatterOpts = DeleteCases[{
+        With[{pw = Lookup[meta, "PageWidth", Inherited]},
+            If[NumericQ[pw], PageWidth -> pw, Nothing]],
+        With[{spb = Lookup[meta, "ShowPageBreaks", Inherited]},
+            If[BooleanQ[spb], ShowPageBreaks -> spb, Nothing]]
+    }, Nothing];
+    Notebook[
+        Join[
+            {chapterSectionCell[title,
+                Replace[chapterNum, Except[_Integer] -> 0]]},
+            If[Lookup[meta, "Subtitle", ""] =!= "",
+                {Cell[Lookup[meta, "Subtitle", ""], "Subchapter"]}, {}],
+            bodyCells
+        ],
+        StyleDefinitions -> $bookStyleSheet,
+        Sequence @@ frontmatterOpts
+    ]
+]
+
 buildNotebook["FunctionResource", data_] := resourceNotebook["Function", data]
 buildNotebook["Paclet", data_] := resourceNotebook["Paclet", data]
 buildNotebook["Example", data_] := resourceNotebook["Example", data]
@@ -2455,6 +3751,8 @@ buildNotebook["TechNote", data_] := tutorialNotebook[data]
 buildNotebook["Overview", data_] := overviewNotebook[data]
 buildNotebook["ComputationalEssay", data_] := essayNotebook[data]
 buildNotebook["Essay", data_] := essayNotebook[data]
+buildNotebook["Chapter", data_] := chapterNotebook[data]
+buildNotebook["BookChapter", data_] := chapterNotebook[data]
 buildNotebook["LLMTool", data_] := resourceNotebook["LLMTool", data]
 buildNotebook[_, data_] := defaultNotebook[data]
 
@@ -2519,11 +3817,20 @@ writeImageIfChanged[path_String, img_] := Block[{existing},
     ]
 ]
 
-markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n = 0, mdOf, codeMd},
+(* Sections whose .nb rendering is input-only (no Output cell shown next
+   to the input): the resource definition cell, the verification tests,
+   the content elements of a Data resource. The .nb still evaluates
+   these cells (the rest of the document needs the resulting bindings),
+   but the published page never shows their outputs - so the twin .md
+   shouldn't either. *)
+$inputOnlyTwinSections = {"definition", "tests", "content"}
+
+markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n = 0, currentSection = "", mdOf, codeMd},
     dir = DirectoryName[target]; base = FileBaseName[target];
     imgDir = FileNameJoin[{dir, "images"}];
     Quiet @ CreateDirectory[imgDir, CreateIntermediateDirectories -> True];
-    codeMd[b_] := Block[{fence, imgFile, img, msgs, msgBlock, hasOutput},
+    codeMd[b_] := Block[{fence, imgFile, img, msgs, msgBlock, prints, prtBlock, outsList, outsBlock, suppressOuts},
+        suppressOuts = MemberQ[$inputOnlyTwinSections, currentSection];
         (* twin keeps no "#| key: value" cell options - those are notebook-side
            evaluation directives (file, screenshot, tear, eval, flag) that have
            no rendered meaning. The file include is already expanded into
@@ -2532,22 +3839,56 @@ markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n
         (* captured kernel messages render as plain markdown blockquote admonitions
            (one per message) so a stray Power::infy or Part::partw shows up in the
            viewer right next to the cell that fired it - the twin had been silent
-           about them, hiding real errors behind a tidy-looking output image. *)
+           about them, hiding real errors behind a tidy-looking output image.
+           Captured Print / Echo output renders the same way, between the fence
+           and any messages, so a `Print["loaded N entries"]` shows up as a
+           visible stdout breadcrumb in the twin. *)
+        prints = If[KeyExistsQ[b, "Prints"], b["Prints"], {}];
+        (* a textual Print renders as a blockquote (same shape as a
+           message); a rich Print (Print[graphic] / Print[dataset] / ...)
+           rasterises to its own PNG and embeds inline, the same way an
+           Output cell does. *)
+        prtBlock = If[prints === {} || MissingQ[prints], "",
+            StringJoin @ Map[
+                With[{tf = printTextForm[#]},
+                    If[ StringQ[tf],
+                        "\n\n" <> messageMd[tf],
+                        n += 1; imgFile = base <> "-" <> ToString[n] <> ".png";
+                        img = UsingFrontEnd @ Rasterize[
+                            Notebook[{# /. Cell[c_, "Print", o___] :> Cell[c, "Output", o]}, LightDark -> $lightDark, StyleDefinitions -> "Default.nb"],
+                            ImageResolution -> 96];
+                        writeImageIfChanged[FileNameJoin[{imgDir, imgFile}], img];
+                        "\n\n![print](images/" <> imgFile <> ")"
+                    ]
+                ] &,
+                prints]];
         msgs = If[KeyExistsQ[b, "Messages"], b["Messages"], {}];
         msgBlock = If[msgs === {} || MissingQ[msgs], "",
             "\n\n" <> StringRiffle[DeleteCases[messageMd /@ msgs, ""], "\n\n"]];
-        hasOutput = executableQ[b] && ! MissingQ[b["OutputBoxes"]] && b["OutputBoxes"] =!= Null;
-        If[ hasOutput,
-            n += 1; imgFile = base <> "-" <> ToString[n] <> ".png";
-            img = UsingFrontEnd @ Rasterize[
-                Notebook[{Cell[BoxData[b["OutputBoxes"]], "Output", Sequence @@ extraOutputOpts[b]]}, LightDark -> $lightDark, StyleDefinitions -> "Default.nb"],
-                ImageResolution -> 96];
-            writeImageIfChanged[FileNameJoin[{imgDir, imgFile}], img];
-            fence <> msgBlock <> "\n\n![output](images/" <> imgFile <> ")",
-            fence <> msgBlock
-        ]
+        (* per-statement outputs: a cell with `1+1\n2+2` produces two output
+           images, one per non-suppressed value. Empty outsList -> no images
+           (a cell whose only statements were `;`-suppressed). Suppressed
+           entirely for sections whose .nb is input-only (see
+           $inputOnlyTwinSections). *)
+        outsList = If[suppressOuts, {}, Replace[Lookup[b, "Outputs", Automatic], Automatic :> {b["OutputBoxes"]}]];
+        outsList = DeleteCases[outsList, _?MissingQ | Null];
+        outsBlock = StringJoin @ Map[
+            (n += 1; imgFile = base <> "-" <> ToString[n] <> ".png";
+                img = UsingFrontEnd @ Rasterize[
+                    Notebook[{Cell[BoxData[#], "Output", Sequence @@ extraOutputOpts[b]]}, LightDark -> $lightDark, StyleDefinitions -> "Default.nb"],
+                    ImageResolution -> 96];
+                writeImageIfChanged[FileNameJoin[{imgDir, imgFile}], img];
+                "\n\n![output](images/" <> imgFile <> ")") &,
+            outsList];
+        fence <> prtBlock <> msgBlock <> outsBlock
     ];
-    mdOf[b_] := Switch[b["Type"],
+    mdOf[b_] := (
+        (* track the current top-level section so codeMd can suppress
+           output images in sections that are input-only in the .nb. *)
+        If[b["Type"] === "Heading" && b["Level"] <= 2,
+            currentSection = ToLowerCase[b["Text"]]
+        ];
+        Switch[b["Type"],
         "Heading", StringRepeat["#", b["Level"]] <> " " <> resolveWebRefs[b["Text"]],
         "Prose", resolveWebRefs[b["Text"]],
         "List", If[ TrueQ[b["Ordered"]],
@@ -2560,8 +3901,11 @@ markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n
         "MathBlock", "$$ " <> b["Text"] <> " $$",
         "Image", "![" <> Lookup[b, "Alt", ""] <> "](" <> Lookup[b, "Path", ""] <> ")",
         "Code", codeMd[b],
+        "Div", "::: " <> b["Kind"] <> "\n\n" <>
+            StringRiffle[DeleteCases[mdOf /@ b["Blocks"], ""], "\n\n"] <>
+            "\n\n:::",
         _, ""
-    ];
+    ]);
     Export[target, serializeFrontmatter[meta] <> "\n" <> StringRiffle[DeleteCases[mdOf /@ blocks, ""], "\n\n"] <> "\n", "Text"];
     target
 ]
@@ -2573,9 +3917,39 @@ markdownWithImages[blocks_, meta_, target_String] := Block[{dir, base, imgDir, n
    PersistentObjects["MarkdownToNotebook/**"] to list, DeleteObject to clear, and
    $PersistencePath / PersistenceLocation to relocate. *)
 $cacheLocation = "Local"
-exampleCacheName[h_Integer] := "MarkdownToNotebook/ExampleOutput/" <> IntegerString[h, 36]
-exampleCacheGet[h_Integer] := PersistentSymbol[exampleCacheName[h], $cacheLocation]
-exampleCacheSet[h_Integer, v_] := (PersistentSymbol[exampleCacheName[h], $cacheLocation] = v;)
+
+(* Sanitise a doc name for use in a PersistentObject path.  The frontmatter
+   "Name" is the canonical identifier ("Wolfram/PureMath", "ReverseAddSequence",
+   ...); we keep "/", "-", ".", "_" and word characters so the namespace path
+   is hierarchical (a publisher-prefixed name like "Wolfram/PureMath" maps to a
+   nested namespace) and replace anything else with "_".  Empty or all-special
+   names fall back to "unnamed". *)
+sanitiseDocNameForCache[s_String] := With[{
+    cleaned = StringTrim[StringReplace[s, Except[WordCharacter | "-" | "." | "/"] -> "_"], "/"]
+},
+    If[cleaned === "", "unnamed", cleaned]
+]
+sanitiseDocNameForCache[_] := "unnamed"
+
+(* Cache entry name: human-searchable per doc + per cell, content-addressed by
+   the cumulative hash.  Layout
+
+       MarkdownToNotebook/ExampleOutput/<DocName>/<NNN>-<hashB36>
+
+   PersistentObjects["MarkdownToNotebook/ExampleOutput/Wolfram/PureMath/*",
+   "Local"] returns every entry for the PureMath doc; cell-001/cell-002 sort
+   lexicographically so the entries enumerate in evaluation order.  The
+   hashB36 suffix preserves the content-addressing - changing a cell's code
+   yields a new hash and a fresh entry; the previous stale entry orphans
+   under the same NNN prefix and is easy to spot when grepping. *)
+exampleCacheName[docName_String, cellIdx_Integer, h_Integer] :=
+    "MarkdownToNotebook/ExampleOutput/" <>
+        sanitiseDocNameForCache[docName] <>
+        "/" <> IntegerString[cellIdx, 10, 3] <>
+        "-" <> IntegerString[h, 36]
+
+exampleCacheGet[name_String] := PersistentSymbol[name, $cacheLocation]
+exampleCacheSet[name_String, v_] := (PersistentSymbol[name, $cacheLocation] = v;)
 
 (* === entry point === *)
 
@@ -2612,7 +3986,7 @@ withMarkdownSource[Notebook[cells_, o : OptionsPattern[]], src_String, tmpl_Stri
 ]
 withMarkdownSource[other_, _, _] := other
 
-Options[MarkdownToNotebook] = {"Evaluate" -> True, "PreserveSource" -> False}
+Options[MarkdownToNotebook] = {"Evaluate" -> True, "PreserveSource" -> False, "EvaluateSeparator" -> Automatic, "MathFont" -> Automatic}
 
 (* spec is an *optional* second argument (default Automatic). Do not split this
    into a separate 1-argument form that forwards to the 3-argument one: an empty
@@ -2633,8 +4007,9 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
        OptionValue::optnf, leaving evalExamples False so nothing is ever evaluated). *)
     evalExamples = TrueQ[Lookup[Flatten[{opts}], "Evaluate", True]],
     preserveSource = TrueQ[Lookup[Flatten[{opts}], "PreserveSource", False]],
+    evalSeparator = Lookup[Flatten[{opts}], "EvaluateSeparator", Automatic],
     src, text, parsed, meta, blocks, sections, tmplName, defCode, ctx, ctxPath,
-    orderedCode, hashes, cached, allHit, outputs, data, filled
+    orderedCode, hashes, cacheDocName, cacheNames, cached, allHit, outputs, data, filled
 },
     src = resolveSource[file];
     text = src["Text"];
@@ -2646,18 +4021,42 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     blocks = resolveIncludes[parsed["Blocks"], src["Base"]];
     tmplName = Lookup[meta, "Template", "Default"];
     $docTemplate = tmplName;
+    (* Automatic (default) leaves math in the front end's native math font; a
+       family name restyles all LaTeX math to it (see applyMathFont). *)
+    $mathFontFamily = Replace[Lookup[Flatten[{opts}], "MathFont", Automatic], Automatic -> ""];
 
     (* evaluate every executable cell in document order, threading state in a
        private context (so the document's own code can't clobber the live
-       session), cached by a cumulative hash of all cells up to each one. *)
-    orderedCode = Cases[blocks, b_ /; executableQ[b]];
-    hashes = cumulativeHashes[orderedCode];
+       session), cached by a cumulative hash of all cells up to each one.
+       "---" thematic breaks and headings (at any level) are picked up
+       alongside the executable cells so the evaluator can reset the context
+       + cumulative-hash chain at each boundary (see resetBoundaryQ /
+       cumulativeHashes / accumEval). *)
+    (* recurse into Div blocks so executable cells nested inside ::: fenced
+       divs (exercises, solutions, solved-examples, ...) get evaluated and
+       cached alongside the top-level cells. *)
+    orderedCode = Cases[blocks,
+        b_ /; (executableQ[b] || MatchQ[b["Type"], "Separator" | "Heading"]), Infinity];
+    hashes = cumulativeHashes[evalSeparator, orderedCode];
+    (* build a per-cell PersistentObject name keyed by (DocName, cellIndex, hash).
+       The doc name comes from the frontmatter Name when present (e.g.
+       "Wolfram/PureMath") and falls back to the source's file basename;
+       cellIndex is 1-based in evaluation order; the hash preserves
+       content-addressing.  See exampleCacheName for the layout. *)
+    cacheDocName = If[$docName === "", src["Name"], $docName];
+    cacheNames = MapIndexed[exampleCacheName[cacheDocName, First[#2], #1] &, hashes];
     ctx = "MTNB$" <> IntegerString[Hash[text], 36] <> "`";
-    (* let example cells resolve the documented paclet's symbols unqualified, plus
-       MarkdownToNotebook's own context so self-referential examples (a doc whose
-       examples call MarkdownToNotebook itself) actually evaluate. *)
-    ctxPath = DeleteDuplicates @ Flatten @ {Lookup[meta, "Context", Nothing], Context[MarkdownToNotebook], "System`"};
-    cached = AssociationMap[exampleCacheGet, hashes];
+    (* let example cells resolve the documented paclet's symbols unqualified.
+       NOT Context[MarkdownToNotebook]: that exposes every internal helper
+       and Block local as a public symbol the example code can collide with
+       (see issue #5 - a free `s` in an example would resolve to accumEval's
+       Block-local `s` and bind to the per-cell state association). For
+       self-referential examples (a doc whose example calls
+       MarkdownToNotebook itself) we install a one-symbol forwarding alias
+       in the per-doc context below. *)
+    ctxPath = DeleteDuplicates @ Flatten @ {Lookup[meta, "Context", Nothing], "System`"};
+    installSelfAlias[ctx];
+    cached = AssociationThread[hashes -> Map[exampleCacheGet, cacheNames]];
     allHit = hashes =!= {} && AllTrue[cached, ! MissingQ[#] &];
     (* "Evaluate" -> False leaves the example cells unevaluated (input only). An
        example may itself convert another document (so its screenshot shows that
@@ -2668,9 +4067,25 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
     outputs = Which[
         ! evalExamples || $convertDepth > 2, <||>,
         allHit, cached,
-        True, evaluateAll[orderedCode, ctx, ctxPath]
+        True, evaluateAll[orderedCode, ctx, ctxPath, evalSeparator]
     ];
-    If[ evalExamples && $convertDepth <= 2 && Not[allHit], KeyValueMap[exampleCacheSet, outputs] ];
+    (* Only persist CLEAN outputs - skip entries whose evaluation emitted kernel
+       messages (Get::noopen, Needs::nocont, Failure[...], runtime errors, ...).
+       Otherwise the very first build, before PacletDirectoryLoad or some other
+       env setup is in place, poisons the cache with the failure messages and
+       every subsequent build serves them back even after the env is fixed. *)
+    If[ evalExamples && $convertDepth <= 2 && Not[allHit],
+        MapThread[
+            Function[{h, name},
+                With[{entry = Lookup[outputs, h, Missing[]]},
+                    If[ AssociationQ[entry] && Lookup[entry, "msgs", {}] === {},
+                        exampleCacheSet[name, entry]
+                    ]
+                ]
+            ],
+            {hashes, cacheNames}
+        ]
+    ];
 
     blocks = annotateOutputs[blocks, hashes, outputs];
     sections = sectionsFrom[blocks];
@@ -2701,7 +4116,7 @@ MarkdownToNotebook[file_String, spec : (_String | Automatic) : Automatic, opts :
 | Option | Default |  |
 |---|---|---|
 | `"Evaluate"` | `True` | evaluate the example cells and keep their output; `False` leaves them as input only, which a self-referential document passes to convert its own source without re-running its own examples |
-| `"PreserveSource"` | `False` | with `True`, stamps the original markdown source into the produced notebook's `TaggingRules` (under the `"MarkdownToNotebook"` key, as `<\ | "Source" -> ..., "Template" -> ...\ | >`) so the `.nb` is self-contained: rendered view + the source it came from in one file, useful for tooling that wants the source side-loaded. The default is `False` so the notebook is a strictly-rendered artifact and any post-conversion edit to the cells shows up faithfully when [NotebookToMarkdown]() walks it back to markdown - the right semantics for diffing the edited `.nb` against the `.md` it was built from. [NotebookToMarkdown]() does NOT read this stash by design |
+| `"PreserveSource"` | `False` | with `True`, stamps the original markdown source into the produced notebook's `TaggingRules` (under the `"MarkdownToNotebook"` key, as `<|"Source" -> ..., "Template" -> ...|>`) so the `.nb` is self-contained: rendered view + the source it came from in one file, useful for tooling that wants the source side-loaded. The default is `False` so the notebook is a strictly-rendered artifact and any post-conversion edit to the cells shows up faithfully when [NotebookToMarkdown]() walks it back to markdown - the right semantics for diffing the edited `.nb` against the `.md` it was built from. [NotebookToMarkdown]() does NOT read this stash by design |
 
 - A `Flag` frontmatter key flags the whole document and a code cell's `#| flag:` option flags that cell, with one of the documentation build's flags - `Future`, `Excised`, `Obsolete`, `Temporary`, `Preview`, or `Internal` - the front end's Futurize / Excise toolbar buttons, written as the build's banner cell.
 - Evaluated example outputs are cached as a [PersistentSymbol](https://reference.wolfram.com/language/ref/PersistentSymbol.html) per cell at the `"Local"` [PersistenceLocation](https://reference.wolfram.com/language/ref/PersistenceLocation.html), keyed by a cumulative hash of the preceding cells, so re-runs reuse them across sessions.
@@ -2844,13 +4259,23 @@ MarkdownToNotebook["> A quoted remark,\n> carried across two lines."]
 
 ### Evaluated code cells
 
-A fenced `wl` cell is evaluated and its output kept (then cached); a cell may carry options as `#| key: value` comment lines at the top - `#| eval: false` shows the code without running it, `#| screenshot: true` rasterizes a produced `Notebook` to an inline image, `#| tear: h` adds the torn-paper screenshot edge, `#| flag: …` marks the cell with a build flag, `#| file: path` replaces the body with the contents of a local file or URL. Two cells - one evaluated, one held - put the option syntax visibly in the markdown source:
+A fenced `wl` cell is evaluated and its output kept (then cached); a cell may carry options as `#| key: value` comment lines at the top - `#| eval: false` shows the code without running it, `#| boxes: true` reads the body as a literal box expression (`RowBox`, `GridBox`, `TemplateBox`, `TooltipBox`, ...) and splices it into a `Cell[BoxData[…], "Input"]` unchanged - no parse to RowBoxes, no evaluation; `#| screenshot: true` rasterizes a produced `Notebook` to an inline image, `#| tear: h` adds the torn-paper screenshot edge, `#| flag: …` marks the cell with a build flag, `#| file: path` replaces the body with the contents of a local file or URL. Two cells - one evaluated, one held - put the option syntax visibly in the markdown source:
 
 ```wl
 MarkdownToNotebook["## Evaluated\n\n```wl\nRange[5]^2\n```\n\n## Held\n\n```wl\n#| eval: false\nRange[5]^2\n```"]
 ```
 
 ![output](images/MarkdownToNotebook-out-11.png)
+
+### Box-literal cells
+
+`#| boxes: true` reads the body as a literal box expression - `RowBox`, `StyleBox`, `GridBox`, `TemplateBox`, `TagBox`, `TooltipBox`, ... - and splices it into a `Cell[BoxData[…], "Input"]` unchanged. No front-end reparse to RowBoxes, no evaluation; the rendered cell shows whatever the boxes say. Pair a regular cell (whose body goes through the reparser) with a `boxes` cell to see the difference in the same screenshot:
+
+```wl
+MarkdownToNotebook["## Reparsed\n\n```wl\nx + y\n```\n\n## Box literal\n\n```wl\n#| boxes: true\nRowBox[{\"x\", StyleBox[\" + \", FontColor -> RGBColor[0.8, 0.043, 0.008]], \"y\"}]\n```"]
+```
+
+![output](images/MarkdownToNotebook-out-12.png)
 
 ### Inlining a file
 
@@ -2860,7 +4285,7 @@ A code cell whose first line is `#| file: path` is replaced by the contents of t
 Export[FileNameJoin[{$TemporaryDirectory, "snippet.wl"}], "Range[5]^2", "Text"]; NotebookPut[MarkdownToNotebook[Export[FileNameJoin[{$TemporaryDirectory, "inc.md"}], "## Inlined\n\n```wl\n#| file: snippet.wl\n```", "Text"]]]
 ```
 
-![output](images/MarkdownToNotebook-out-12.png)
+![output](images/MarkdownToNotebook-out-13.png)
 
 ### Inlining an image
 
@@ -2878,7 +4303,7 @@ Omitted (or `"Notebook"`) returns the [Notebook](https://reference.wolfram.com/l
 MarkdownToNotebook["---\nName: Demo\nKeywords: [alpha, beta]\n---\n# Demo", "Association"]
 ```
 
-![output](images/MarkdownToNotebook-out-13.png)
+![output](images/MarkdownToNotebook-out-14.png)
 
 ### Writing a markdown twin
 
@@ -2888,7 +4313,7 @@ Targeting a markdown file writes a GitHub-renderable *twin* of the document - th
 Module[{dir = CreateDirectory[]}, MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", FileNameJoin[{dir, "twin.md"}]]; Import[FileNameJoin[{dir, "twin.md"}], "Text"]]
 ```
 
-![output](images/MarkdownToNotebook-out-14.png)
+![output](images/MarkdownToNotebook-out-15.png)
 
 ### Flagging a document or cell
 
@@ -2898,7 +4323,7 @@ The documentation build's *flags* - the front end's Futurize / Excise toolbar bu
 MarkdownToNotebook["## Demo\n\n```wl\n#| flag: future\nRange[5]^2\n```", "Association"]["Notebook"]
 ```
 
-![output](images/MarkdownToNotebook-out-15.png)
+![output](images/MarkdownToNotebook-out-16.png)
 
 ---
 
@@ -2911,7 +4336,7 @@ MarkdownToNotebook[StringReplace[
 ]]
 ```
 
-![output](images/MarkdownToNotebook-out-16.png)
+![output](images/MarkdownToNotebook-out-17.png)
 
 ## Options
 
@@ -2923,7 +4348,7 @@ By default every `wl` example cell is evaluated and its output kept. With the de
 MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
 ```
 
-![output](images/MarkdownToNotebook-out-17.png)
+![output](images/MarkdownToNotebook-out-18.png)
 
 ---
 
@@ -2933,7 +4358,21 @@ MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```"]
 MarkdownToNotebook["## Squares\n\n```wl\nRange[5]^2\n```", "Evaluate" -> False]
 ```
 
-![output](images/MarkdownToNotebook-out-18.png)
+![output](images/MarkdownToNotebook-out-19.png)
+
+### EvaluateSeparator
+
+Controls when the per-document evaluation context is reset while example cells are run in sequence. A reset clears every symbol the document has defined in its private `MTNB$…` context and `ClearSystemCache[]`s, and the cumulative-hash chain that the example cache is keyed by also restarts - so cache validity is local to one section instead of the whole notebook. The host session's `Global`` context is never touched.
+
+- `"EvaluateSeparator" -> Automatic` *(default)* - reset at every `---` thematic break and at every heading (at any level), so each (sub)section starts with a clean context. Two cells under the same heading share state; the next heading or `---` wipes it.
+- `"EvaluateSeparator" -> None` - never reset; the whole notebook shares one context and one cumulative-hash chain. This is the historical M2N behaviour and is useful when one section depends on a symbol defined further up.
+- `"EvaluateSeparator" -> All` - reset before *every* executable cell. Each cell runs in a fresh context and its cache key depends only on its own code (so two cells with identical text always cache-hit, but neither can see definitions from prior cells).
+
+```wl
+MarkdownToNotebook["## A\n\n```wl\nx = 1\n```\n\n```wl\nx + 10\n```\n\n## B\n\n```wl\nValueQ[x]\n```", "EvaluateSeparator" -> Automatic]
+```
+
+![output](images/MarkdownToNotebook-out-20.png)
 
 ## Applications
 
@@ -2947,7 +4386,7 @@ The [`ReverseAddSequence`](https://github.com/sw1sh/MarkdownToNotebook/blob/main
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/ReverseAddSequence.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-19.png)
+![output](images/MarkdownToNotebook-out-21.png)
 
 ### Paclet
 
@@ -2957,7 +4396,27 @@ The published [Wolfram/AccessibleColors](https://resources.wolframcloud.com/Pacl
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/main/docs/Guides/AccessibleColors.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-20.png)
+![output](images/MarkdownToNotebook-out-22.png)
+
+---
+
+The [WolframParser](https://github.com/sw1sh/WolframParser) paclet - a fast, composable parser library that pairs a `GrammarRules` DSL compiled via `FunctionCompile` with a Parsec-style combinator core - is a larger Paclet example: guide, twelve symbol pages, six tutorials, the LaTeX-math parser, and the resource-submission notebook all driven from the same `docs/` markdown tree; the built guide is deployed [here](https://www.wolframcloud.com/obj/nikm/DeployedResources/Paclet/WolframParser):
+
+```wl
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/WolframParser/main/docs/Guides/WolframParser.md"]
+```
+
+![output](images/MarkdownToNotebook-out-23.png)
+
+---
+
+The [PAdic](https://github.com/sw1sh/PAdic) paclet - p-adic valuations, the non-archimedean norm, digit expansions in $\mathbb{Q}_p$, and Hensel lift - is a math-heavy Paclet example whose guide and symbol pages use inline `$…$` LaTeX throughout; the built guide is deployed [here](https://www.wolframcloud.com/obj/nikm/DeployedResources/Paclet/PAdic):
+
+```wl
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/PAdic/main/docs/Guides/PAdic.md"]
+```
+
+![output](images/MarkdownToNotebook-out-24.png)
 
 ### Example
 
@@ -2967,7 +4426,7 @@ The `Example` template fills the [Example Repository](https://resources.wolframc
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/PrimeSpiralPoints.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-21.png)
+![output](images/MarkdownToNotebook-out-25.png)
 
 ---
 
@@ -2977,7 +4436,7 @@ The [Discrete-Time Quantum Walk](https://github.com/sw1sh/MarkdownToNotebook/blo
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/QuantumWalk.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-22.png)
+![output](images/MarkdownToNotebook-out-26.png)
 
 ### Data
 
@@ -2987,7 +4446,7 @@ The `Data` template fills the [Data Repository](https://resources.wolframcloud.c
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/WallpaperGroups.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-23.png)
+![output](images/MarkdownToNotebook-out-27.png)
 
 ### Prompt
 
@@ -2997,7 +4456,7 @@ The `Prompt` template fills the [Prompt Repository](https://resources.wolframclo
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/AdaLovelace.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-24.png)
+![output](images/MarkdownToNotebook-out-28.png)
 
 ### Demonstration
 
@@ -3007,17 +4466,17 @@ The `Demonstration` template fills the [Demonstrations Project](https://demonstr
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/BlochSphereGates.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-25.png)
+![output](images/MarkdownToNotebook-out-29.png)
 
 ### Overview
 
-The `Overview` template fills the doc-tools overview page - the paclet's high-level table of contents that links into its Guide, Symbol, and Tutorial pages. Heading depth picks the cell style (`#` → `TOCDocumentTitle`, `##` → `TOCChapter`, `###` → `TOCSection`, `####` → `TOCSubsection`, `#####` → `TOCSubsubsection`); a bulleted list under a heading becomes TOC leaves one level deeper; each entry's `[Label](paclet:Pub/Pkg/<kind>/Name)` link is rendered as a clickable `ButtonBox`. The worked sample is the [AccessibleColors Overview](https://github.com/sw1sh/MarkdownToNotebook/blob/main/examples/AccessibleColors/docs/Tutorials/Overview.md):
+The `Overview` template fills the doc-tools overview page - the paclet's high-level table of contents that links into its Guide, Symbol, and Tutorial pages. Heading depth picks the cell style (`#` → `TOCDocumentTitle`, `##` → `TOCChapter`, `###` → `TOCSection`, `####` → `TOCSubsection`, `#####` → `TOCSubsubsection`); a bulleted list under a heading becomes TOC leaves one level deeper; each entry's `[Label](paclet:Pub/Pkg/<kind>/Name)` link is rendered as a clickable `ButtonBox`. The worked sample is the [AccessibleColors Overview](https://github.com/sw1sh/AccessibleColors/blob/main/docs/Tutorials/Overview.md):
 
 ```wl
-MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/AccessibleColors/docs/Tutorials/Overview.md"]
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/AccessibleColors/refs/heads/main/docs/Tutorials/Overview.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-26.png)
+![output](images/MarkdownToNotebook-out-30.png)
 
 ### Computational Essay
 
@@ -3027,7 +4486,17 @@ The `ComputationalEssay` template fills the Wolfram [Computational Essay](https:
 MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/PiIsMostlyRandom.md"]
 ```
 
-![output](images/MarkdownToNotebook-out-27.png)
+![output](images/MarkdownToNotebook-out-31.png)
+
+### Book
+
+The `Chapter` template fills the [Wolfram Book Tools](https://resources.wolframcloud.com/PacletRepository/resources/Wolfram/WolframBookTools) chapter notebook - the structure used by long-form course / book material with TOC navigation, exercises, vocabulary, Q&A, and back matter. The [IntroToQuantumComputing](https://github.com/sw1sh/MarkdownToNotebook/tree/main/examples/IntroToQuantumComputing) example is a worked two-chapter book modelled on the first two lessons of the [Wolfram Quantum Framework](https://github.com/WolframResearch/QuantumFramework) course, augmented with the book-style back matter the original notebooks did not have. Each chapter compiles independently; the build script also stamps `ExpressionUUID`s on heading cells (so the TOC buttons have stable jump targets), generates `Contents.nb` in the same shape `WolframBookTools` `WBTMakeContentsFromDialog` writes, and (`--publish`) deploys the whole book to the cloud - chapter 1 [here](https://www.wolframcloud.com/obj/nikm/IntroToQuantumComputing/01-what-is-quantum-computation.nb), chapter 2 [here](https://www.wolframcloud.com/obj/nikm/IntroToQuantumComputing/02-building-blocks-of-quantum-circuits.nb), and the [TOC](https://www.wolframcloud.com/obj/nikm/IntroToQuantumComputing/Contents.nb):
+
+```wl
+MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/examples/IntroToQuantumComputing/chapters/01-what-is-quantum-computation.md"]
+```
+
+![output](images/MarkdownToNotebook-out-32.png)
 
 ## Properties and Relations
 
@@ -3037,7 +4506,7 @@ The Wolfram Language already reads markdown into a plain notebook - <code>[Impor
 ImportString["# Title\n\nText with inline math $\\sin x$.", {"Markdown", "Notebook"}]
 ```
 
-![output](images/MarkdownToNotebook-out-28.png)
+![output](images/MarkdownToNotebook-out-33.png)
 
 `FunctionResource` then fills the same template [CreateNotebook](https://reference.wolfram.com/language/ref/CreateNotebook.html)["FunctionResource"] opens (publishable with [ResourceSubmit](https://reference.wolfram.com/language/ref/ResourceSubmit.html)), and `Symbol`/`Guide` fill the DocumentationTools templates `DocumentationBuild` turns into reference pages.
 
@@ -3049,7 +4518,7 @@ A string that is neither a URL nor an existing file is treated as raw markdown, 
 MarkdownToNotebook["nonexistent.md", "Association"]["Sections"]
 ```
 
-![output](images/MarkdownToNotebook-out-29.png)
+![output](images/MarkdownToNotebook-out-34.png)
 
 ## Neat Examples
 
@@ -3059,7 +4528,7 @@ The neatest example is this very document: running the function on its own GitHu
 NotebookPut[MarkdownToNotebook["https://raw.githubusercontent.com/sw1sh/MarkdownToNotebook/refs/heads/main/MarkdownToNotebook.md", "Evaluate" -> False]]
 ```
 
-![output](images/MarkdownToNotebook-out-30.png)
+![output](images/MarkdownToNotebook-out-35.png)
 
 Because this very document is itself such a literate source - its `## Definition` inlines `MarkdownToNotebook.wl` and its frontmatter is the resource metadata - running the function on it reproduces this definition notebook, so the function publishes itself.
 
@@ -3077,8 +4546,6 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-31.png)
-
 A `<code>[Symbol](https://reference.wolfram.com/language/ref/Symbol.html)</code>` reference in a Usage signature carries a paclet link on the head (regression: the link silently disappeared when the `<code>` rule was rewritten to wrap the whole span in one `InlineFormula` instead of recursing on the inside):
 
 ```wl
@@ -3091,8 +4558,6 @@ VerificationTest[
     TestID -> "<code>[Symbol]()…</code> in Usage carries a paclet link on the head"
 ]
 ```
-
-![output](images/MarkdownToNotebook-out-32.png)
 
 A bullet list with indented continuation lines folds each continuation into the preceding item, so a three-bullet list with two-line continuations is three items, not six (regression: the list parser used to break at the continuation, producing alternating one-item lists and stray paragraphs):
 
@@ -3108,8 +4573,6 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-33.png)
-
 A backslash-escaped punctuation character inside `<code>...</code>` is a *markdown* source escape and unescapes before the cell is built - so `<code>\*</code>` lands in the notebook as a literal `*`, not as `\*` (regression: the `<code>` wrapper let markdown formatting through but skipped the backslash-unescape step, leaving the literal backslash in the cell content):
 
 ```wl
@@ -3123,8 +4586,6 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-34.png)
-
 The unescape preserves Wolfram named-character escapes (`\[CircleTimes]`, `\[Theta]`, ...) - they share the leading `\[` with the markdown `\[` punctuation escape, so the Wolfram-name pattern is matched first and rebuilt verbatim (regression: the punctuation rule ate the leading `\`, leaving a stray `[CircleTimes]` that the inferred-link parser then auto-linked into a ButtonBox):
 
 ```wl
@@ -3137,8 +4598,6 @@ VerificationTest[
     TestID -> "`<code>\\[Name]</code>` preserves the Wolfram named-character escape"
 ]
 ```
-
-![output](images/MarkdownToNotebook-out-35.png)
 
 The `#| excluded: true` cell option appends the `"Excluded"` style after the cell's base style; the scraper strips any `Cell[..., "Excluded", ...]` from the published resource but the cell stays in the authoring `.nb`:
 
@@ -3158,8 +4617,6 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-36.png)
-
 A heading carries the same inline markup prose does - backticks become an `InlineFormula` cell, bold / italic / math / links render the same way they would in a paragraph (regression: heading text was stored as a plain string and emitted as `Cell["A `foo` heading", "Section"]` with the backticks rendered literally):
 
 ```wl
@@ -3178,8 +4635,6 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-37.png)
-
 Bold / italic / strike runs containing other inline markup ("**$x$**", "*$n$*", "**`code`**", "~~$y$~~") recursively re-enter `inlineTextData` and distribute the formatting onto each resulting element via `wrapStyle`; an `InlineFormula` cell inside a bold span gets the `FontWeight -> "Bold"` option on the cell itself (regression: the bold rule used to capture the inner string verbatim and emit `StyleBox["$x$", "Bold"]`, so math / code inside bold rendered as literal `$x$`):
 
 ```wl
@@ -3191,14 +4646,12 @@ VerificationTest[
             Missing[],
             Infinity
         ],
-        Cell[TextData[{"Some ", Cell[BoxData[FormBox["1", TraditionalForm]], "InlineFormula", FontWeight -> "Bold"], " prose."}], "Text"]
+        Cell[TextData[{"Some ", Cell[BoxData["1"], "InlineFormula", FontWeight -> "Bold"], " prose."}], "Text"]
     ],
     True,
     TestID -> "bold containing math wraps the InlineFormula with FontWeight -> Bold"
 ]
 ```
-
-![output](images/MarkdownToNotebook-out-38.png)
 
 A real-world document (thousands of lines) parses without hitting the default `$RecursionLimit` of 1024 - the line-by-line `blockLoop` and its splitters are tail-recursive but Wolfram does not optimize tail calls, so `parseBlocks` now lifts the limit to scale with the input (regression: a ~1500-line tutorial like [SymmetrySubcontextTutorial.md](https://raw.githubusercontent.com/sw1sh/TensorNetworks/refs/heads/master/Notebooks/Tests%20and%20explorations/Symmetry/SymmetrySubcontextTutorial.md) aborted with `TerminatedEvaluation[RecursionLimit]`):
 
@@ -3213,8 +4666,6 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-39.png)
-
 The `"PreserveSource"` option defaults to `False` so a notebook the converter writes does *not* carry the source in its `TaggingRules` - any later edit to the cells is the new truth, visible in the walker's diff:
 
 ```wl
@@ -3224,8 +4675,6 @@ VerificationTest[
     TestID -> "\"PreserveSource\" defaults to False - no stash in TaggingRules"
 ]
 ```
-
-![output](images/MarkdownToNotebook-out-40.png)
 
 With `"PreserveSource" -> True`, the source is stamped under the `"MarkdownToNotebook"` tagging key byte-exact:
 
@@ -3246,8 +4695,6 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-41.png)
-
 The `#| hidden: true` cell option adds the `"HiddenMaterial"` modifier style and `CellOpen -> False` so the cell renders closed on the published web page (and open in the downloadable example notebook):
 
 ```wl
@@ -3266,8 +4713,6 @@ VerificationTest[
 ]
 ```
 
-![output](images/MarkdownToNotebook-out-42.png)
-
 The `Overview` template maps the markdown heading hierarchy to TOC* cells (`#` → `TOCDocumentTitle`, `##` → `TOCChapter`, `###` → `TOCSection`, ...) and turns bulleted list items under a heading into TOC leaves one level deeper:
 
 ```wl
@@ -3281,5 +4726,3 @@ VerificationTest[
     TestID -> "`Template: Overview` emits TOCDocumentTitle/TOCChapter/TOCSection cells"
 ]
 ```
-
-![output](images/MarkdownToNotebook-out-43.png)

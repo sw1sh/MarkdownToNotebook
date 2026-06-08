@@ -87,6 +87,8 @@ extractFrontmatter[text_String] := Block[{lines, close},
 (* === block parsing === *)
 
 fenceQ[line_String] := StringMatchQ[StringTrim[line], "```" ~~ ___]
+fenceLen[line_String] := StringLength @ FirstCase[
+    StringCases[StringTrim[line], StartOfString ~~ f : ("`" ..) :> f], _String, ""]
 
 headingQ[line_String] := StringMatchQ[line, ("#" ..) ~~ " " ~~ ___]
 
@@ -122,10 +124,14 @@ codeBlock[info_String, bodyLines_List] := Block[{optLines, codeLines},
     |>
 ]
 
-fenceSplit[{}, collected_] := {Reverse[collected], {}}
-fenceSplit[lines_List, collected_] := If[ fenceQ[First[lines]],
-    {Reverse[collected], Rest[lines]},
-    fenceSplit[Rest[lines], Prepend[collected, First[lines]]]
+(* fenceSplit[lines, openLen]: gather lines until a CLOSE fence whose own
+   backtick run is at least openLen long. A shorter fence inside a longer one
+   is content, not a closer (CommonMark semantics). Iterative so we don't
+   trip $IterationLimit on a very long inlined-file cell (a `#| file:`
+   include of, say, 5000 lines). *)
+fenceSplit[lines_List, openLen_Integer] := Module[{n = Length[lines], i = 1},
+    While[i <= n && ! (fenceQ[lines[[i]]] && fenceLen[lines[[i]]] >= openLen), i++];
+    {Take[lines, i - 1], If[i > n, {}, Drop[lines, i]]}
 ]
 
 (* Pandoc-style fenced divs ":::". An opening line "::: kind" (kind is any
@@ -327,8 +333,8 @@ blockLoop[lines_List, acc_] := Block[{line = First[lines], rest = Rest[lines], s
             blockLoop[rest, acc]
         ,
         fenceQ[line],
-            split = fenceSplit[rest, {}];
-            blockLoop[Last[split], Prepend[acc, codeBlock[StringReplace[StringTrim[line], StartOfString ~~ "```" -> ""], First[split]]]]
+            split = fenceSplit[rest, fenceLen[line]];
+            blockLoop[Last[split], Prepend[acc, codeBlock[StringReplace[StringTrim[line], StartOfString ~~ ("`" ..) -> ""], First[split]]]]
         ,
         divOpenQ[line],
             split = divSplit[rest];
@@ -436,11 +442,21 @@ resolveIncludes[blocks_List, base_String] := Map[resolveBlock[#, base] &, blocks
 
 (* === sections === *)
 
+(* Canonicalise a heading title to its section-key form. The doc-template's
+   ExampleSection cells ship with "&" in titles ("Properties & Relations",
+   "Scope & Additional Elements"); some hand-authored .md files use the
+   word "and" instead. Normalise both to the same canonical key so a doc
+   that round-trips through NotebookToMarkdown (which recovers the
+   template's literal "&" title) is re-recognised on the next forward
+   build. *)
+sectionKey[text_String] := StringReplace[ToLowerCase[text], " & " -> " and "]
+
 sectionsFrom[blocks_List] := Block[{step, init},
     init = <|"key" -> "", "acc" -> <||>|>;
     step[state_, b_] := Which[
         b["Type"] === "Heading" && b["Level"] <= 2,
-            <|"key" -> ToLowerCase[b["Text"]], "acc" -> Append[state["acc"], ToLowerCase[b["Text"]] -> {}]|>
+            With[{k = sectionKey[b["Text"]]},
+                <|"key" -> k, "acc" -> Append[state["acc"], k -> {}]|>]
         ,
         state["key"] === "",
             state

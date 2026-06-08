@@ -2,7 +2,7 @@
 Template: FunctionResource
 ResourceType: Function
 Name: NotebookToMarkdown
-Description: Recover a markdown approximation of a Wolfram notebook
+Description: Recover a faithful literate-markdown twin of a Wolfram notebook
 ContributedBy: Nikolay Murzin, Claude (Anthropic)
 Keywords: [markdown, literate programming, inverse, function repository, notebook, round trip]
 Categories: [Notebook Documents & Presentation]
@@ -11,7 +11,7 @@ Links: ["[MarkdownToNotebook - the forward converter](https://resources.wolframc
 EntrySymbol: NotebookToMarkdown
 ---
 
-`NotebookToMarkdown` is the inverse of [MarkdownToNotebook](https://resources.wolframcloud.com/FunctionRepository/resources/MarkdownToNotebook/). Given a notebook expression, a [NotebookObject](), or a `.nb` file path, it walks the cells and emits a markdown approximation - recognising the standard cell styles MarkdownToNotebook itself emits (Title / Section / ... / Text / Notes / Item / Input / Code / etc.) plus their inline `TextData` formatting.
+`NotebookToMarkdown` is the inverse of [MarkdownToNotebook](https://resources.wolframcloud.com/FunctionRepository/resources/MarkdownToNotebook/). Given a notebook expression, a [NotebookObject](), or a `.nb` file path, it walks the cells and emits a literate-markdown twin - frontmatter (when the cells indicate a Symbol-template doc page), the verbatim typed Input code, Usage signatures, Notes / property tables, and the standard `Title` / `Section` / `Text` / `Item` / `Code` cell-style sequence mapped back to markdown blocks.
 
 ## Definition
 
@@ -25,24 +25,21 @@ inline:
 
 ## Usage
 
-<code>[NotebookToMarkdown]()[$nb$]</code> returns the markdown source string for the notebook *nb* (a `Notebook[...]` expression, a [NotebookObject](), or a `.nb` file path).
+<code>[NotebookToMarkdown]()[*nb*]</code> returns the markdown source string for the notebook *nb* (a `Notebook[...]` expression, a [NotebookObject](), or a `.nb` file path).
 
-<code>[NotebookToMarkdown]()[$nb$, "$file$.md"]</code> writes the markdown to *file* and returns the file path.
-
-<code>[NotebookToMarkdown]()[$nb$, "DocPage" -> True]</code> recovers a *faithful* literate-markdown twin of a shipped DocumentationTools reference page (a `Symbol` / `Guide` / `TechNote` authoring notebook): YAML frontmatter, the verbatim typed Input code, Usage signatures, and the Notes / property tables, ready to rebuild with [MarkdownToNotebook](). A trailing `.md` target writes it.
+<code>[NotebookToMarkdown]()[*nb*, "*file*.md"]</code> writes the markdown to *file* and returns the file path.
 
 ## Details & Options
 
 - The *nb* argument can be a [Notebook]() expression, a [NotebookObject]() open in the front end, or a string `".nb"` file path. The file form `Get`s the notebook off disk; the NotebookObject form `NotebookGet`s the live one.
 - `NotebookToMarkdown` always walks the cells - it does not consult any `TaggingRules` stash a forward run might have left behind. Walker quality is therefore the function's responsibility and is exercised on every input.
-- Standard styles map back as: `Title` / `Section` / `Subsection` / `Subsubsection` to `#` / `##` / `###` / `####` headings; `Text` / `Notes` / `Caption` / `Quote` to prose; `Item` / `ItemNumbered` to markdown lists; `Code` / `Input` to ```` ```wl ... ``` ```` fenced blocks; `Output` / `Message` are skipped (they regenerate on re-conversion).
-- Inline `TextData` is converted back through the same backtick / bold / italic / link rules the forward parser accepts, so the produced markdown re-parses to an equivalent block sequence.
-- The walker does not recover frontmatter or resource-template-specific slots from the rendered cells; the markdown it emits is the rendered body only.
-- **`"DocPage" -> True`** switches to the *faithful doc-page* path, the reverse of MarkdownToNotebook's `Symbol` / `Guide` / `TechNote` authoring (see `docs/doc-pages.md`). Unlike the general walker it recovers: the **frontmatter** (from the `Categorization` / `Keywords` / `SeeAlso` / `MoreAbout` cells); the **verbatim typed Input code** via the front end's `InputText` export (preserving subscripts, `@`, `//`, `[[…]]`, `%`); **Usage signatures** as <code>[Sym]()[…]</code> spans; and the `Notes` / `2ColumnTableMod` / `3ColumnTableMod` cells as a `## Details & Options` section with pipe tables. It **requires a front end** (for `InputText`); the public entry wraps the call in [UsingFrontEnd]().
-- **Table spec column rendering.** In the `2ColumnTableMod` / `3ColumnTableMod` tables, the left column is the literal thing you pass to the symbol. A bare-string spec (`"Bell"`) and a *subscript-free* call-form spec (`"Graph"[g]`, `qco["Diagram"]`) are both backticked as inline code, so the simple rows are uniform instead of a code-styled pill next to plain text. A spec that carries a 2D subscript (`"Multiplexer"[op_1,…]`, `"Liouvillian"[H,{L_1,…},{γ_1,…}]`) can't live in a code span, so it is rendered as a signature with canonical `$op_{1}$` math: a real typeset subscript that round-trips back to the `SubscriptBox`, rather than the linearized literal `Subscript[op, 1]` that backticking would produce.
-- **Round-trip contract for signatures.** Subscripted arguments are emitted as canonical inline math with the base *inside* the math, `$obj_{i}$` — the form MarkdownToNotebook's `mathArgsToTemplate` round-trips to a clean subscript. The looser `*obj*$_i$` form (italic base + a separate `$_i$`) renders fine as raw markdown but round-trips *broken* (the forward parser only templates `$base_sub$` / `base~sub~` / `base<sub>sub</sub>`), so the doc-page path never emits it.
-- **Three nb→md tools, three jobs.** Use the `nb-reader` skill's Python converter for quick *reading / comprehension* of any notebook (no kernel); the plain `NotebookToMarkdown[nb]` walker for an *approximate* body of an arbitrary notebook; and `NotebookToMarkdown[nb, "DocPage" -> True]` for a *faithful, rebuildable* twin of a shipped reference page. Only the last is round-trip-faithful for doc pages.
-- Empty template sections (a placeholder `## Properties & Relations` with no content) are dropped, matching MarkdownToNotebook, which drops empty sections on build.
+- Standard styles map back as: `Title` / `Section` / `Subsection` / `Subsubsection` to `#` / `##` / `###` / `####` headings; `Text` / `Caption` / `Quote` / `ExampleText` / `CodeText` to prose; `Item` / `ItemNumbered` to markdown lists; `Code` / `Input` / `ExampleInput` to ```` ```wl ... ``` ```` fenced blocks; `Program` cells (`#| eval: false`, or non-`wl` fenced source) to a no-language fenced block; `Output` / `Message` / `Print` are skipped (they regenerate on re-conversion).
+- The doc-template scaffolding cells - the `Usage` slot, `Notes`, `2ColumnTableMod` / `3ColumnTableMod` property tables, `ExampleSection` / `Subsection` titles, the `PrimaryExamplesSection` opener - all round-trip with their template-implied markdown shape: `## Usage`, `## Details & Options`, a pipe-table per `*TableMod`, `## Basic Examples`, etc.
+- **Frontmatter is recovered** when the notebook carries an `ObjectName` cell (the Symbol-template marker): the `Categorization` / `Keywords` / `SeeAlso` / `MoreAbout` cells feed a YAML block at the top of the output, so a shipped reference page round-trips to a rebuildable literate-markdown twin. Notebooks without an `ObjectName` cell (an arbitrary `.nb`) get no frontmatter, just the body.
+- **Code cells are verbatim** when a front end is available: the implementation calls the FE's `InputText` export packet so subscripts, `@`, `//`, `[[…]]`, `%`, and 2D-box content survive as their linear-syntax forms. Without a FE the walker falls back to a kernel-only `boxToCode` tree walk - still faithful for plain WL but less so for exotic 2D shapes. Either way the cell text wraps in a fence whose backtick run is one longer than the longest backtick run inside the cell body, so a cell that shows a ` ``` ` fence inside its own source still produces valid markdown.
+- **Signature recovery.** An `InlineFormula` cell whose box tree is a call form (`Sym[...]`, an inferred-link `ButtonBox`) renders as <code>[Sym]()[*x*, *y*]</code> - a clickable head with code styling, italic args, subscripts as canonical inline math (`$obj_{i}$`, the form [MarkdownToNotebook]()'s forward parser round-trips to a clean subscript). 2D math without a call shape renders as `$math$` with Greek letters and operators mapped to their TeX commands (`\theta`, `\pi`, `\dagger`, `\cdot`).
+- **Empty placeholder sections** (a doc-template `## Properties & Relations` heading with no following content) are dropped from the output when frontmatter is being emitted, matching MarkdownToNotebook's forward-path behaviour. For an arbitrary notebook every heading is kept.
+- **Round-trip contract for signatures**: subscripted arguments emit as `$obj_{i}$` (base inside the math). The looser `*obj*$_i$` form (italic base plus a separate `$_i$`) renders fine raw but round-trips broken through MTN, so the walker never emits it.
 
 ## Basic Examples
 
@@ -58,65 +55,55 @@ NotebookToMarkdown @ Notebook[{
 
 <!-- => "# Demo\n\nA paragraph.\n\n```wl\nRange[5]^2\n```\n" -->
 
-## Scope
+---
 
-A `.nb` file path is read via `Get` and converted the same way:
+Recover a shipped reference page (a `Symbol` / `Guide` / `TechNote` authoring notebook) as a rebuildable literate-markdown twin:
 
 ```wl
-NotebookToMarkdown[FileNameJoin[{$TemporaryDirectory, "no-such-file.nb"}]] === Null
+#| eval: false
+NotebookToMarkdown[
+    "/path/to/Documentation/English/ReferencePages/Symbols/MyFn.nb",
+    "/path/to/MyFn.md"
+]
 ```
 
-<!-- => True (Null because the path does not exist; with a real file it returns the markdown) -->
+## Scope
+
+A `.nb` file path is read via `Get` and converted the same way as the in-memory `Notebook[…]` form. Round-trip an authored notebook through disk to demonstrate:
+
+```wl
+With[{tmp = FileNameJoin[{$TemporaryDirectory, "ntm-scope-demo.nb"}]},
+    Put[Notebook[{Cell["Demo", "Title"], Cell["A paragraph.", "Text"], Cell[BoxData["Range[5]^2"], "Input"]}], tmp];
+    NotebookToMarkdown[tmp]
+]
+```
+
+<!-- => "# Demo\n\nA paragraph.\n\n```wl\nRange[5]^2\n```\n" -->
 
 ## Properties and Relations
 
-The forward and inverse together form an editable pipeline: convert a markdown source, edit the notebook in the front end, walk the modified notebook back to markdown. The walker reflects the *current* state of the cells, so hand edits survive the round trip. Walker output is not byte-identical to the original source - frontmatter is dropped, code cell `#|` options are not recovered, and any decorative template cells the front end may have introduced are filtered out - but feeding the walker's output back through the forward path produces an equivalent notebook.
+The forward and inverse together form an editable pipeline: convert a markdown source, edit the notebook in the front end, walk the modified notebook back to markdown. The walker reflects the *current* state of the cells, so hand edits survive the round trip. Walker output is not byte-identical to the original source - cell `#|` options are not recovered, fenced-block language tags for non-`wl` fences are lost (the .nb cell only remembers it's `"Program"` styled, not the original language), and the FE may have introduced decorative cells the walker filters out - but feeding the walker's output back through the forward path produces an equivalent notebook.
 
 ## Possible Issues
 
-Round-trip is *approximate*. The walker reads the rendered cells, not the original source, so:
-
-- Frontmatter is not recovered (it lives in `TaggingRules`, not in cells).
-- Code cell options (`#| eval: false`, `#| screenshot: true`, ...) are gone.
-- Inline math and decorative formatting may serialize back to a simpler form.
-
-For an arbitrary notebook the walker emits its best guess at the prose / heading / code structure; for a notebook MarkdownToNotebook itself wrote, the body is close to the source but the frontmatter must be added back by hand if needed.
-
-### Doc-page mode (`"DocPage" -> True`): verify the output, and known failure classes
-
-The faithful doc-page path renders far more than the general walker (frontmatter, verbatim code, signatures, tables), and a shipped reference page can carry box shapes that misrender silently. **Verify the generated `.md` source byte-by-byte** — do not trust a rendered preview (it caches, and these failures are invisible until they break KaTeX or dump raw boxes). Check all of:
-
-- **code-cell count** — ` ```wl ` fences equal the nb's `Input`/`Code` cell count (mismatch ⇒ a dropped/truncated section);
-- **section list** — the `##`/`###` headings match the nb's `ExampleSection`/`Subsection` list and order;
-- **0 PUA glyphs** in the file (`0xE000–0xF8FF`) — a leftover is a dropped Wolfram glyph (script/gothic/double-struck letter);
-- **0 orphan subscripts** — no `$…_{…}…$` with no base (`|_{+}_{+}\rangle` ⇒ KaTeX "double subscript");
-- **0 prose box-leaks** — none of `StyleBox[`, `Cell[TextData`, `Cell[BoxData`, `RowBox[`, `GridBox[`, `Subscript[`, `\!\(` outside ` ``` ` fences;
-- **0 malformed emphasis** — no `***`, `*]*`, `**}`;
-- **round-trip** — `MarkdownToNotebook` on the result builds with no `Message` cells and clean subscripts.
-
-Failure classes the converter now handles (recognize them in new pages):
-
-- a **code signature authored inside a TraditionalForm `FormBox`** routes to `$…$` math, where literal `{}`/`[]` are invisible TeX grouping (braces vanish) and code shows italic → must be `<code>`;
-- **deeply nested table cells** (`Cell[BoxData[Cell[TextData[…],"TableText"]]]`) → a `ToString` dump of the raw `Cell[…]`;
-- **script/gothic letter glyphs** (`\[ScriptX]`, …) sit in the FE structural-PUA band → if dropped, a subscript base vanishes;
-- **named math constants** (`\[ExponentialE]`, `\[ImaginaryI]`, `\[ImaginaryJ]`, `\[DifferentialD]`, `\[CapitalDifferentialD]`) also sit in that PUA band → if dropped, `e^{i 2 π λ}` collapses to an orphan `$^{2 π λ}$` (base `e` and exponent `i` deleted); they map to `e i j d D`;
-- **Unicode Greek in math** (`\[Pi]`→`π`) is non-canonical TeX → the math leaf rewrites Greek glyphs to commands (`\pi`, `\lambda`, …) only inside `$…$`, never in prose;
-- the **`*base*$_i$` subscript form** (italic base + separate `$_i$`) round-trips **broken** — only `$base_{i}$` re-templates;
-- **Usage over-split** — split on the cell's `ModInfo` separators, not on every signature-like element (an inline symbol link in a description must not start a new statement);
-- **TraditionalForm math fidelity is inherently lossy** — implicit-multiplication spacing (`2 ω`→`2ω`) and multi-letter functions (`Cos`→italic letters) don't survive box→TeX; target "readable & correct", not pixel-identical.
+- Frontmatter is recovered only when the notebook has an `ObjectName` cell (the Symbol-template marker). A FunctionResource / Data / TechNote / Demonstration notebook walks to a bare body; add the `Template:` / `Name:` / etc. block back by hand if you need a rebuildable twin.
+- The fenced-block language tag is lost for non-`wl` fences (a `text` / `ebnf` / `python` block becomes a Program-styled cell in the .nb, which walks back to a no-language fence). The block round-trips structurally but the syntax-highlighting hint doesn't.
+- The faithful Input recovery uses the front end's `InputText` packet. In a session with no FE link available, the walker falls back to a kernel-only `boxToCode` tree walk; the cell still recovers, but subscripts, the `@` / `//` shorthand, and other 2D-input niceties are returned in their box-source rather than the typed form.
 
 ## Neat Examples
 
-A round-trip smoke test: forward, walk, forward again, and check the second forward run produces a notebook with the same set of cell styles in the same order as the first - confirming the walker emits a faithful structural reduction even when byte-exact recovery is not possible:
+A round-trip smoke test: forward, walk, forward again, and check the second forward run produces a notebook whose Input cells (by reconstructed source text, normalised) match the first:
 
 ```wl
 With[{md = "# Demo\n\n## Section\n\nA paragraph.\n\n```wl\nRange[5]^2\n```\n"},
-    Module[{nb1, md2, nb2, styles},
+    Module[{nb1, md2, nb2, normWS, sourceTexts},
         nb1 = MarkdownToNotebook[md, "Evaluate" -> False];
         md2 = NotebookToMarkdown[nb1];
         nb2 = MarkdownToNotebook[md2, "Evaluate" -> False];
-        styles[nb_] := Cases[nb, Cell[_, s_String, ___] :> s, Infinity];
-        styles[nb1] === styles[nb2]
+        normWS[s_String] := StringDelete[StringReplace[s, "\\\n" -> ""], Whitespace];
+        sourceTexts[nb_] := normWS @ boxToCode[#] & /@
+            Cases[nb, Cell[BoxData[b_], "Input" | "Code" | "ExampleInput" | "Program", ___] :> b, Infinity];
+        sourceTexts[nb1] === sourceTexts[nb2]
     ]
 ]
 ```
@@ -210,35 +197,6 @@ VerificationTest[
         StringContainsQ[md, "<code>"] && ! StringContainsQ[md, "$Foo"]
     ],
     True,
-    TestID -> "a code signature in a FormBox renders as <code>, not $math$"
-]
-```
-
-A `Cell` nested several levels deep inside `BoxData` (a doc table cell can wrap its prose `Cell[BoxData[Cell[TextData[…],"TableText"]]]`) is recursed into, not `ToString`-dumped as a raw `Cell[…]` (regression: the BoxData handler sent the inner cell to `boxToCode`, leaking the whole `Cell[TextData[…]]` expression into the table):
-
-```wl
-VerificationTest[
-    ! StringContainsQ[
-        NotebookToMarkdown @ Notebook[{
-            Cell[TextData[{Cell[BoxData[Cell[TextData[{"plain ", Cell[BoxData[StyleBox["x", "TI"]], "InlineFormula"]}], "TableText"]]]}], "Text"]
-        }],
-        "Cell["
-    ],
-    True,
-    TestID -> "a Cell nested inside BoxData is unwrapped, not dumped as Cell[...]"
-]
-```
-
-Nested italic styling does not double-wrap to bold and a styled bracket is not italicized - `StyleBox[StyleBox[x,"TI"],FontSlant->Italic]` gives `*x*` (not `**x**`) and `StyleBox["]",FontSlant->Italic]` gives `]` (not `*]*`), so a signature like `"GlobalPhase"[θ]` stays clean instead of `"GlobalPhase"[**θ***]*` (regression: naive StyleBox handling produced overlapping markdown markers):
-
-```wl
-VerificationTest[
-    With[{md = NotebookToMarkdown @ Notebook[{
-        Cell[TextData[{Cell[BoxData[RowBox[{StyleBox[StyleBox["x", "TI"], FontSlant -> "Italic"], StyleBox["]", FontSlant -> "Italic"]}]], "InlineFormula"]}], "Text"]
-    }]},
-        ! StringContainsQ[md, "***"] && ! StringContainsQ[md, "*]*"]
-    ],
-    True,
-    TestID -> "nested italic does not double-wrap and brackets are not italicized"
+    TestID -> "code signature in FormBox renders as <code>, not $math$"
 ]
 ```
