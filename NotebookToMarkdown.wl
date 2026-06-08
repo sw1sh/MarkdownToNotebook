@@ -94,6 +94,18 @@ walkerMath["mod"] := "\\bmod "
 walkerMath["div"] := "\\div "
 walkerMath["gcd"] := "\\gcd "
 walkerMath["lcm"] := "\\operatorname{lcm} "
+(* Set-brace tokens: bare "{"/"}" in TeX is invisible grouping, so a real
+   set brace has to be escaped (issue #9). These only catch brace tokens
+   from the box tree - the "_{"/"}" grouping that subscript/superscript
+   rules splice in are rule-body literals, never strings reaching this
+   leaf. *)
+walkerMath["{"] := "\\{"
+walkerMath["}"] := "\\}"
+(* Arrow operators live in PUA (\[Rule] = U+F522) and normStr would drop
+   them as FE structural markers - catch as specific-token matches before
+   the generic leaf (issue #9). *)
+walkerMath["\[Rule]"] := "\\to "
+walkerMath["\[RightArrow]"] := "\\to "
 walkerMath[s_String /; s =!= "" && StringMatchQ[s, Whitespace]] := "\\, "
 walkerMath[s_String] := StringReplace[normStr[s], Normal @ $mathTeX]
 walkerMath[StyleBox[s_, ___]] := walkerMath[s]
