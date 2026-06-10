@@ -2013,7 +2013,11 @@ wrapStyle[other_, _] := other
    the formatting is then distributed across each resulting element via
    wrapStyle. Returning a Sequence keeps the surrounding StringSplit's
    result list flat. *)
-emWith[s_String, opts_List] := Sequence @@ Map[wrapStyle[#, opts] &, inlineTextData[s]]
+(* the recursive emphasis call goes through inlineTextDataCore so the outer
+   inlineTextData's link-box stash (Block-dynamic $inlineLinkBoxes) is
+   visible - otherwise nested **[a](u)** would lose the pre-extracted link
+   when the bold rule recurses. *)
+emWith[s_String, opts_List] := Sequence @@ Map[wrapStyle[#, opts] &, inlineTextDataCore[s]]
 
 emBoldBox[s_String] := emWith[s, {FontWeight -> "Bold"}]
 emItalicBox[s_String] := emWith[s, {"TI"}]
@@ -2151,10 +2155,33 @@ mathBlockCell[math_String] := With[{
    the label in code/formula style as the link, i.e. a reference link the way
    See Also entries look. So [`WCAGContrastRatio`](paclet:.../ref/WCAGContrastRatio)
    is a code-styled symbol link, while [the docs](https://...) is a prose link. *)
-linkButton[text_String, url_String] := If[
+linkButton[text_, url_String] := If[
     StringStartsQ[url, "paclet:"],
     ButtonBox[text, BaseStyle -> "Link", ButtonData -> url],
     ButtonBox[text, BaseStyle -> "Hyperlink", ButtonData -> {URL[url], None}]
+]
+
+(* link text supports inline emphasis per CommonMark - "[*Title*](u)" should
+   render as a link whose visible label is italic, not as a link displaying
+   literal asterisks. Strip a single outer "*"/"**"/"***" wrapper and apply
+   the corresponding style under the ButtonBox; mixed / nested cases fall
+   through to the literal string form. (StringMatchQ would interpret a
+   leading/trailing "*" pattern as a wildcard, so we use StringStartsQ /
+   StringEndsQ - those treat strings as literals - and reject inner stars
+   so "*foo* bar *baz*" does not get incorrectly stripped.) *)
+strippedQ[text_String, marker_String] := With[{n = StringLength[marker]},
+    StringLength[text] >= 2 n + 1
+        && StringStartsQ[text, marker] && StringEndsQ[text, marker]
+        && !StringContainsQ[StringTake[text, {n + 1, -n - 1}], "*"]
+]
+linkButtonStyled[text_String, url_String] := Which[
+    strippedQ[text, "***"],
+        linkButton[StyleBox[StringTake[text, {4, -4}], "TI", FontWeight -> "Bold"], url],
+    strippedQ[text, "**"],
+        linkButton[StyleBox[StringTake[text, {3, -3}], FontWeight -> "Bold"], url],
+    strippedQ[text, "*"],
+        linkButton[StyleBox[StringTake[text, {2, -2}], "TI"], url],
+    True, linkButton[text, url]
 ]
 
 backtickedQ[text_String] := StringMatchQ[text, "`" ~~ ___ ~~ "`"]
@@ -2178,8 +2205,10 @@ linkInline[text_String, url_String] := Which[
     backtickedQ[text], Cell[BoxData @ linkButton[StringTake[text, {2, -2}], url], "InlineFormula"],
     (* a plain label is an ordinary prose hyperlink; markdown's \<punct> escapes
        in the label (e.g. "[Wolfram\`Parser\`](paclet:...)") unescape before the
-       ButtonBox so the displayed text doesn't keep the literal backslashes. *)
-    True, linkButton[unescapeMarkdownPunctuation[text], url]
+       ButtonBox so the displayed text doesn't keep the literal backslashes.
+       linkButtonStyled additionally honours a single layer of *...* / **...**
+       emphasis around the label. *)
+    True, linkButtonStyled[unescapeMarkdownPunctuation[text], url]
 ]
 
 (* the ref-page URI a bare symbol name resolves to: a name in the documented
@@ -2262,61 +2291,94 @@ linkInferred[name_String] := Block[{url = inferURL[name]},
     ]
 ]
 
-inlineTextData[text_String] := Replace[
-    (* underscore emphasis runs last, on the plain-text runs the main split leaves
-       behind, so its word-boundary check never sees code / link / math content. *)
+(* CommonMark parses links before emphasis - in "*Continue [*Title*](url)*"
+   the link binds tighter than the surrounding "*...*" italic, so the inner
+   "*"s belong to the link text, not to the outer emphasis. A single-pass
+   StringSplit with both italic and link in its alternative list does the
+   wrong thing: italic at the leading "*" wins by leftmost position and
+   eats forward past the link's "[", breaking the link into pieces.
+
+   Fix: pre-extract every link / image to a sentinel placeholder before the
+   emphasis split runs. The stash sits in Block-dynamic $inlineLinkBoxes so
+   the recursive emWith re-entry from nested emphasis still resolves the
+   parent's placeholders. The core split's sentinel rule splices each link
+   box back at its original position. *)
+$inlineLinkBoxes = {}
+
+inlineTextData[text_String] := Block[{$inlineLinkBoxes = {}}, inlineTextDataCore[text]]
+
+inlineTextDataCore[text_String] := Module[{prep, stash},
+    stash = Function[box,
+        AppendTo[$inlineLinkBoxes, box];
+        "\:f8f5" <> IntegerString[Length[$inlineLinkBoxes]] <> "\:f8f6"
+    ];
+    prep = StringReplace[text, {
+        (* literal-content spans first: their inner text is verbatim and
+           must survive the backslash mask / link extraction below
+           untouched (e.g. "<code>\[CircleTimes]</code>" - the named-char
+           escape lives inside the code span and the mask rule below would
+           otherwise eat the leading backslash). StringReplace picks the
+           leftmost match position, so a "<code>...</code>" starting at an
+           earlier offset wins over a backslash mask that would otherwise
+           fire deeper inside the span. *)
+        "<code>" ~~ inner : Shortest[__] ~~ "</code>" :> stash[codeInlineCell[inner]],
+        "``" ~~ c : Shortest[__] ~~ "``" :> stash[literalCodeInline[c]],
+        "`" ~~ c : Shortest[__] ~~ "`" :> stash[codeToInline[c]],
+        "$$" ~~ m : Shortest[Except["$"] ..] ~~ "$$" :> stash[mathInline[m]],
+        "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> stash[mathInline[m]],
+        (* mask "\[" / "\!" so neither triggers the link / image patterns;
+           any other "\X" escape passes through here and is handled by the
+           normal punctuation-escape rule in the main split. *)
+        "\\" ~~ c : ("[" | "!") :> "\:f8fb" <> c,
+        (* image (leading "!") matched before link, same as the original
+           single-pass order. *)
+        "![" ~~ a : Shortest[Except["]"] ...] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> stash[inlineImage[a, u]],
+        (* allow an empty URL "[`Symbol`]()" - the pandoc / GitHub-renderable
+           inferred form (an empty link is at least a recognisable link element in
+           markdown viewers); linkInline routes it to linkInferred. The bare
+           "[`Symbol`]" without parens is *not* auto-linked: that follows strict
+           markdown semantics ("[X]" alone is literal bracketed text) and avoids
+           surprising linkifying of expressions like "[`Import`]["doc.md"]" where
+           the author wanted only inline code. *)
+        "[" ~~ t : Shortest[Except["]"] ..] ~~ "](" ~~ u : Shortest[Except[")"] ...] ~~ ")" :> stash[linkInline[t, u]]
+    }];
     Replace[
-        StringSplit[text, {
-            (* a backslashed ASCII punctuation is that literal char (so \* is not
-               emphasis); listed first so the escape wins before the marker rules. *)
-            "\\" ~~ c : PunctuationCharacter :> c,
-            (* "<code>...</code>" - the canonical inline-HTML wrapper for a code-styled
-               span that may contain a markdown link and italic args inside. Pandoc /
-               GitHub use it because markdown forbids nested formatting inside a
-               backticked code span. The whole inner span is rendered as a single
-               InlineFormula cell so the code styling wraps everything - the linked
-               head AND the surrounding brackets AND the italic args - not just the
-               linked head; the previous strip-and-recurse left the brackets and
-               args as plain text in the surrounding TextData. The signature is fed
-               through templateBox (the same pipeline usageStatement uses), so a
-               head in $docContext or System` gets its paclet link automatically. *)
-            "<code>" ~~ inner : Shortest[__] ~~ "</code>" :> codeInlineCell[inner],
-            (* an inline image is a link with a leading "!"; match it before the link *)
-            "![" ~~ a : Shortest[Except["]"] ...] ~~ "](" ~~ u : Shortest[Except[")"] ..] ~~ ")" :> inlineImage[a, u],
-            (* allow an empty URL "[`Symbol`]()" - that is the pandoc / GitHub-renderable
-               inferred form (an empty link is at least a recognisable link element in
-               markdown viewers); linkInline routes it to linkInferred. The bare
-               "[`Symbol`]" without parens is *not* auto-linked: that follows strict
-               markdown semantics ("[X]" alone is literal bracketed text) and avoids
-               surprising linkifying of expressions like "[`Import`]["doc.md"]" where
-               the author wanted only inline code. *)
-            "[" ~~ t : Shortest[Except["]"] ..] ~~ "](" ~~ u : Shortest[Except[")"] ...] ~~ ")" :> linkInline[t, u],
-            "``" ~~ c : Shortest[__] ~~ "``" :> literalCodeInline[c],
-            "`" ~~ c : Shortest[__] ~~ "`" :> codeToInline[c],
-            "$$" ~~ m : Shortest[Except["$"] ..] ~~ "$$" :> mathInline[m],
-            "$" ~~ m : Shortest[Except["$"] ..] ~~ "$" :> mathInline[m],
-            "~~" ~~ s : Shortest[__] ~~ "~~" :> emStrikeBox[s],
-            (* portable subscript "H<sub>2</sub>O" and superscript "2<sup>10</sup>" -
-               HTML tags renderers agree on. The single-tilde / single-caret Pandoc
-               shorthands ("H~2~O", "2^10^") are accepted too; listed after "~~" so
-               strikethrough wins at a doubled-tilde position. *)
-            "<sub>" ~~ s : Shortest[Except["<"] ..] ~~ "</sub>" :> proseSubBox[s],
-            "<sup>" ~~ s : Shortest[Except["<"] ..] ~~ "</sup>" :> proseSupBox[s],
-            "~" ~~ s : Shortest[Except["~"|" "] ..] ~~ "~" :> proseSubBox[s],
-            "^" ~~ s : Shortest[Except["^"|" "] ..] ~~ "^" :> proseSupBox[s],
-            "***" ~~ s : Shortest[__] ~~ "***" :> emBoldItalicBox[s],
-            "**" ~~ s : Shortest[__] ~~ "**" :> emBoldBox[s],
-            (* *word* -> italic: the StyleBox["TI"] form usage descriptions mark
-               arguments with (not a formula cell) *)
-            Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> emItalicBox[i]
-        }],
-        s_String :> Sequence @@ underscoreEm[s],
+        (* underscore emphasis runs last, on the plain-text runs the main split leaves
+           behind, so its word-boundary check never sees code / link / math content. *)
+        Replace[
+            StringSplit[prep, {
+                (* restore pre-extracted link / image / code / math boxes at
+                   their original positions. Highest priority so emphasis
+                   cannot reach across the placeholder. *)
+                "\:f8f5" ~~ idx : DigitCharacter .. ~~ "\:f8f6" :> $inlineLinkBoxes[[FromDigits[idx]]],
+                (* restore "\[" / "\!" mask as the literal char *)
+                "\:f8fb" ~~ c : ("[" | "!") :> c,
+                (* other backslash escapes (handled here, not in pre-extraction,
+                   so they do not corrupt code / math content) *)
+                "\\" ~~ c : PunctuationCharacter :> c,
+                "~~" ~~ s : Shortest[__] ~~ "~~" :> emStrikeBox[s],
+                (* portable subscript "H<sub>2</sub>O" and superscript "2<sup>10</sup>" -
+                   HTML tags renderers agree on. The single-tilde / single-caret Pandoc
+                   shorthands ("H~2~O", "2^10^") are accepted too; listed after "~~" so
+                   strikethrough wins at a doubled-tilde position. *)
+                "<sub>" ~~ s : Shortest[Except["<"] ..] ~~ "</sub>" :> proseSubBox[s],
+                "<sup>" ~~ s : Shortest[Except["<"] ..] ~~ "</sup>" :> proseSupBox[s],
+                "~" ~~ s : Shortest[Except["~"|" "] ..] ~~ "~" :> proseSubBox[s],
+                "^" ~~ s : Shortest[Except["^"|" "] ..] ~~ "^" :> proseSupBox[s],
+                "***" ~~ s : Shortest[__] ~~ "***" :> emBoldItalicBox[s],
+                "**" ~~ s : Shortest[__] ~~ "**" :> emBoldBox[s],
+                (* *word* -> italic: the StyleBox["TI"] form usage descriptions mark
+                   arguments with (not a formula cell) *)
+                Verbatim["*"] ~~ i : (Except["*"] ..) ~~ Verbatim["*"] :> emItalicBox[i]
+            }],
+            s_String :> Sequence @@ underscoreEm[s],
+            {1}
+        ],
+        (* a literal "..." in prose should be the single ellipsis character (the
+           notebook analysis flags three dots); only the plain-text runs are touched. *)
+        s_String :> StringReplace[s, "..." -> "\[Ellipsis]"],
         {1}
-    ],
-    (* a literal "..." in prose should be the single ellipsis character (the
-       notebook analysis flags three dots); only the plain-text runs are touched. *)
-    s_String :> StringReplace[s, "..." -> "\[Ellipsis]"],
-    {1}
+    ]
 ]
 
 (* a Symbol page's "## Usage" prose, rendered as one Usage cell with its inline
