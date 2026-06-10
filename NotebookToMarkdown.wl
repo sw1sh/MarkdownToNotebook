@@ -156,6 +156,10 @@ walkerMath[other_] := ToString[other, InputForm]
    surface equivalents - subscripts and superscripts have no surface form so we
    use the canonical functional one. *)
 boxToCode[s_String] := normStr[s]
+(* multi-statement Input cells store as BoxData[{b1, ";", "\n", b2, ...}] -
+   a bare List of boxes. Without this rule the headless boxToCode fallback
+   dumps the raw box tree via ToString[InputForm] (issue #16). *)
+boxToCode[xs_List] := StringJoin[boxToCode /@ xs]
 boxToCode[RowBox[xs_List]] := StringJoin[boxToCode /@ xs]
 boxToCode[FractionBox[a_, b_]] := boxToCode[a] <> "/" <> boxToCode[b]
 boxToCode[SqrtBox[a_]] := "Sqrt[" <> boxToCode[a] <> "]"
