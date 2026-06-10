@@ -2519,7 +2519,23 @@ fillCategorization[nb_, type_String, meta_] := Block[{
     filled
 ]
 
-setDocMetadata[Notebook[cells_, o : OptionsPattern[]], meta_, type_String] := Block[{opts = Flatten[{o}], md, tr},
+(* doc templates evaluate each example unit independently - default
+   CellContext to CellGroup so example state does not leak between units /
+   sections; honor a frontmatter "CellContext" override (issue #19).
+   Bare-symbol names "CellGroup" / "Notebook" / "InheritFromParent" map
+   to the corresponding symbol; anything else passes through as a literal
+   context string (e.g. `"Global`"`). *)
+$docCellContextDefault = <|"Symbol" -> CellGroup, "Guide" -> CellGroup, "Tech Note" -> CellGroup|>
+parseCellContextValue[v_Symbol] := v
+parseCellContextValue[s_String] := Switch[StringTrim[s],
+    "CellGroup", CellGroup,
+    "Notebook", Notebook,
+    "InheritFromParent", InheritFromParent,
+    _, StringTrim[s]
+]
+parseCellContextValue[other_] := other
+
+setDocMetadata[Notebook[cells_, o : OptionsPattern[]], meta_, type_String] := Block[{opts = Flatten[{o}], md, tr, cc},
     md = {
         "title" -> Lookup[meta, "Name", Lookup[meta, "Title", ""]],
         "context" -> Lookup[meta, "Context", ""],
@@ -2533,7 +2549,14 @@ setDocMetadata[Notebook[cells_, o : OptionsPattern[]], meta_, type_String] := Bl
     };
     tr = Lookup[opts, TaggingRules, {}];
     tr = If[ ListQ[tr], Append[DeleteCases[tr, "Metadata" -> _], "Metadata" -> md], {"Metadata" -> md} ];
-    Notebook[cells, TaggingRules -> tr, Sequence @@ DeleteCases[opts, _[TaggingRules, _]]]
+    cc = If[ KeyExistsQ[meta, "CellContext"],
+        parseCellContextValue[meta["CellContext"]],
+        Lookup[$docCellContextDefault, type, Automatic]
+    ];
+    Notebook[cells, TaggingRules -> tr,
+        Sequence @@ If[cc === Automatic, {}, {CellContext -> cc}],
+        Sequence @@ DeleteCases[opts, _[TaggingRules | CellContext, _]]
+    ]
 ]
 
 (* markdown example-taxonomy sections -> the symbol page's ExampleSection titles
