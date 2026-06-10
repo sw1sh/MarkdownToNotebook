@@ -1939,9 +1939,11 @@ linkURI[name_String, paclet_String, kind_String] := Block[{flat = flatPackageNam
 ]
 
 (* a related-guide / related-tutorial link cell: a RefLinkPlain TemplateBox
-   wrapped in TextData (issue #20). *)
+   wrapped in an InlineFormula BoxData cell inside TextData (issue #20).  The
+   BoxData wrapper is required: a bare TemplateBox directly in TextData breaks
+   Export[..., "NB"] (the SeeAlso path does the same via docLinkCell). *)
 guideLinkContent[name_String, paclet_String, kind_String] :=
-    TextData[refLinkPlainBox[name, "paclet:" <> linkURI[name, paclet, kind]]]
+    TextData[Cell[BoxData[refLinkPlainBox[name, "paclet:" <> linkURI[name, paclet, kind]]], "InlineFormula"]]
 
 (* fill a style's XXXX placeholders with one cell per given content expression *)
 fillDocCells[nb_, style_String, contents_List] := Block[{vals = contents, first = True},
