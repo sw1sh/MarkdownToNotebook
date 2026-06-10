@@ -51,11 +51,18 @@ resolves this). `URI` is the page's `ref/` path.
 
 ## Sections
 
-- `## Usage` - one statement per paragraph. The canonical signature form wraps
-  the whole signature in an inline `<code>` tag so markdown viewers process the
-  nested markdown inside it (links, italics, math) while rendering the whole
-  span in code style. Substitute the actual symbol and argument names; the
-  examples below use a hypothetical `MyFunc[x_1, x_2]`:
+- `## Usage` - one statement per paragraph. Usage lists only
+  input/construction signatures — the `DownValues` forms `Sym[args]` that
+  call the symbol to build a result. Instance application (`obj[input]`),
+  property/method access (`obj["prop"]`), and parameter substitution are
+  `SubValues` (behavior of an already-constructed object) and belong in
+  `## Details` / `## Scope` / `## Properties and Relations` — never Usage.
+  For an object-head symbol, an `obj[…]` action line in Usage is a category
+  error. The canonical signature form wraps the whole signature in an inline
+  `<code>` tag so markdown viewers process the nested markdown inside it
+  (links, italics, math) while rendering the whole span in code style.
+  Substitute the actual symbol and argument names; the examples below use a
+  hypothetical `MyFunc[x_1, x_2]`:
 
       <code>[MyFunc]()[$x_1$, $x_2$]</code> gives the result, computed from $x_1$ and $x_2$.
 
