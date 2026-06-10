@@ -1837,27 +1837,86 @@ fillDocList[nb_, style_String, items_List] := Block[{vals = DeleteCases[items, "
     ]
 ]
 
-(* a resolved documentation link, e.g. paclet:Wolfram/AccessibleColors/ref/WCAGLevel *)
-docLinkCell[name_String, uri_String] :=
-    Cell[BoxData[ButtonBox[name, BaseStyle -> "Link", ButtonData -> "paclet:" <> uri]], "InlineFormula"]
+(* the flattened package-name URI segment the DocumentationTools link templates
+   use (issue #20): Context "Wolfram`PureMath`" -> "WolframPureMath";
+   Paclet "Wolfram/PureMath" -> "WolframPureMath".  Falls back to the Paclet
+   value as-is when neither has letters (so a bare publisher-less name still
+   round-trips). *)
+flatPackageName[paclet_String, context_String] := With[
+    {fromCtx = StringDelete[context, "`"], fromPac = StringDelete[paclet, "/"]},
+    Which[fromCtx =!= "", fromCtx, fromPac =!= "", fromPac, True, paclet]
+]
+flatPackageName[paclet_String] := flatPackageName[paclet, $docContext]
 
-(* the link target for a See Also / More About entry. A System symbol (e.g.
-   StandardRed, LightDarkSwitched) points at its system ref page; a related guide
-   that is not the paclet's own (e.g. Color, Accessibility) points at the system
-   guide; otherwise the link is into the paclet (the paclet's own guide is taken
-   to be the last segment of Pub/Name). *)
-linkURI[name_String, paclet_String, kind_String] := Which[
-    kind === "ref" && symbolInContextQ[name, "System`"] && ! symbolInContextQ[name, $docContext],
-        "ref/" <> name,
-    kind === "guide" && paclet =!= "" && name =!= Last[StringSplit[paclet, "/"]],
-        "guide/" <> name,
-    True,
-        paclet <> "/" <> kind <> "/" <> name
+(* the DocumentationTools-shaped typed link boxes (issue #20).  PackageLink for a
+   paclet symbol (3-arg, "<Flat> Package Symbol" tag), RefLink for a System
+   symbol, RefLinkPlain for a guide / tutorial / other paclet-scheme target.
+   The doc center's link resolver and CloudPublish's paclet: -> web rewrite key
+   off these templates, so plain ButtonBox links get silently dropped. *)
+packageLinkBox[name_, url_String, pkg_String] := TemplateBox[
+    {Cell[TextData[name]], url, pkg <> " Package Symbol"},
+    "PackageLink", BaseStyle -> "InlineFormula"
+]
+refLinkBox[name_, url_String] := TemplateBox[
+    {Cell[TextData[name]], url}, "RefLink", BaseStyle -> "InlineFormula"
+]
+refLinkPlainBox[label_, url_String, baseSty_:Automatic] := TemplateBox[
+    {Cell[TextData[label]], url},
+    "RefLinkPlain",
+    BaseStyle -> Replace[baseSty, Automatic -> {"InlineFormula"}]
 ]
 
-(* a related-guide / related-tutorial link cell: a Link ButtonBox in TextData *)
+(* dispatch a "paclet:..." link target to the corresponding typed TemplateBox
+   (issue #20).  Mirrors DocumentationBuild's ConvertButtonBox:
+   paclet:<Pkg>/ref/<Sym> -> PackageLink (with the package segments flattened
+   into one identifier, the form CloudPublish keys off);
+   paclet:ref/<Sym> -> RefLink; anything else under paclet: -> RefLinkPlain. *)
+pacletLinkBox[label_, url_String] := Block[{rest, parts, kind, name, flat, flatURL},
+    rest = StringDelete[url, StartOfString ~~ "paclet:"];
+    parts = StringSplit[rest, "/"];
+    Which[
+        Length[parts] >= 3 && parts[[-2]] === "ref",
+            kind = parts[[-2]]; name = parts[[-1]];
+            flat = StringJoin[parts[[;; -3]]];
+            flatURL = "paclet:" <> flat <> "/" <> kind <> "/" <> name;
+            packageLinkBox[label, flatURL, flat],
+        Length[parts] === 2 && parts[[1]] === "ref",
+            refLinkBox[label, url],
+        Length[parts] >= 3 && MemberQ[{"guide", "tutorial"}, parts[[-2]]],
+            kind = parts[[-2]]; name = parts[[-1]];
+            flat = StringJoin[parts[[;; -3]]];
+            refLinkPlainBox[label, "paclet:" <> flat <> "/" <> kind <> "/" <> name],
+        True, refLinkPlainBox[label, url]
+    ]
+]
+
+(* a resolved documentation link, e.g. paclet:WolframAccessibleColors/ref/WCAGLevel.
+   Wraps the typed-link TemplateBox in an InlineFormula cell (issue #20). *)
+docLinkCell[name_String, uri_String] :=
+    Cell[BoxData[pacletLinkBox[name, "paclet:" <> uri]], "InlineFormula"]
+
+(* the link target for a See Also / More About entry.  A System symbol (e.g.
+   StandardRed, LightDarkSwitched) points at its system ref page; a guide is
+   paclet-qualified for the documented paclet (the typed-link templates need
+   the qualified path; a bare paclet:guide/Name is the System form).  The URI
+   uses the flattened package name (issue #20). *)
+linkURI[name_String, paclet_String, kind_String] := Block[{flat = flatPackageName[paclet, $docContext]},
+    Which[
+        kind === "ref" && symbolInContextQ[name, "System`"] && ! symbolInContextQ[name, $docContext],
+            "ref/" <> name,
+        kind === "guide" && symbolInContextQ[name, "System`"] && ! symbolInContextQ[name, $docContext] && flat === "",
+            "guide/" <> name,
+        flat =!= "",
+            flat <> "/" <> kind <> "/" <> name,
+        True,
+            kind <> "/" <> name
+    ]
+]
+
+(* a related-guide / related-tutorial link cell: a RefLinkPlain TemplateBox
+   wrapped in TextData (issue #20). *)
 guideLinkContent[name_String, paclet_String, kind_String] :=
-    TextData[ButtonBox[name, BaseStyle -> "Link", ButtonData -> "paclet:" <> linkURI[name, paclet, kind]]]
+    TextData[refLinkPlainBox[name, "paclet:" <> linkURI[name, paclet, kind]]]
 
 (* fill a style's XXXX placeholders with one cell per given content expression *)
 fillDocCells[nb_, style_String, contents_List] := Block[{vals = contents, first = True},
@@ -1965,10 +2024,12 @@ codeInlineCell[inner_String] := Block[{sig, head, url, boxes, unescaped},
     url = If[head =!= "", inferURL[head], None];
     boxes = templateBox[sig];
     If[ url =!= None,
+        (* wrap the head token in the typed paclet link (issue #20) so the doc
+           center / CloudPublish resolve it the same way DocumentationBuild does. *)
         boxes = Replace[boxes, {
-            s_String /; s === head :> ButtonBox[s, BaseStyle -> "Link", ButtonData -> url],
+            s_String /; s === head :> pacletLinkBox[s, url],
             RowBox[{s_String /; s === head, rest___}] :>
-                RowBox[{ButtonBox[s, BaseStyle -> "Link", ButtonData -> url], rest}]
+                RowBox[{pacletLinkBox[s, url], rest}]
         }]
     ];
     Cell[BoxData @ boxes, "InlineFormula"]
@@ -2174,7 +2235,7 @@ mathBlockCell[math_String] := With[{
    is a code-styled symbol link, while [the docs](https://...) is a prose link. *)
 linkButton[text_, url_String] := If[
     StringStartsQ[url, "paclet:"],
-    ButtonBox[text, BaseStyle -> "Link", ButtonData -> url],
+    pacletLinkBox[text, url], (* issue #20 *)
     ButtonBox[text, BaseStyle -> "Hyperlink", ButtonData -> {URL[url], None}]
 ]
 
@@ -2231,12 +2292,12 @@ linkInline[text_String, url_String] := Which[
 (* the ref-page URI a bare symbol name resolves to: a name in the documented
    paclet's context links to its paclet ref page, a System symbol to its system
    ref page; anything else does not resolve. *)
-inferURL[name_String] := Which[
-    symbolInContextQ[name, $docContext] && $docPaclet =!= "", "paclet:" <> $docPaclet <> "/ref/" <> name,
+inferURL[name_String] := With[{flat = flatPackageName[$docPaclet, $docContext]}, Which[
+    symbolInContextQ[name, $docContext] && flat =!= "", "paclet:" <> flat <> "/ref/" <> name, (* issue #20 *)
     symbolInContextQ[name, $docContext], "paclet:ref/" <> name,
     symbolInContextQ[name, "System`"], "paclet:ref/" <> name,
     True, None
-]
+]]
 
 (* the public web URL a bare symbol name resolves to. Mirrors inferURL but for the
    GitHub-renderable twin: paclet symbols point at their PacletRepository page, System
@@ -2304,7 +2365,7 @@ resolveWebRefs[text_String] := Block[{s = text, resolveLink},
 linkInferred[name_String] := Block[{url = inferURL[name]},
     If[ url === None,
         codeToInline[name],
-        Cell[BoxData @ ButtonBox[name, BaseStyle -> "Link", ButtonData -> url], "InlineFormula"]
+        Cell[BoxData @ pacletLinkBox[name, url], "InlineFormula"] (* issue #20 *)
     ]
 ]
 
@@ -2661,10 +2722,13 @@ symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"]
 ]
 
 (* the palette's "Inline Listing": a function-name chip linking to its ref page,
-   the same box the Documentation Tools button produces. *)
-guideFnChip[name_String, paclet_String] := Cell[
-    BoxData[ButtonBox[name, BaseStyle -> "Link", ButtonData -> "paclet:" <> paclet <> "/ref/" <> name]],
-    "InlineGuideFunction", TaggingRules -> {"PageType" -> "Function"}
+   the same typed link the Documentation Tools button produces (issue #20). *)
+guideFnChip[name_String, paclet_String] := With[
+    {flat = flatPackageName[paclet, $docContext]},
+    Cell[
+        BoxData[pacletLinkBox[name, "paclet:" <> If[flat === "", paclet, flat] <> "/ref/" <> name]],
+        "InlineGuideFunction", TaggingRules -> {"PageType" -> "Function"}
+    ]
 ]
 
 (* a "## Functions" list item "`Sym` description" -> the docked "1-Line Function"

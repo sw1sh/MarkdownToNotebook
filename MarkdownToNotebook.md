@@ -442,13 +442,13 @@ VerificationTest[
 ]
 ```
 
-A `<code>[Symbol]()</code>` reference in a Usage signature carries a paclet link on the head (regression: the link silently disappeared when the `<code>` rule was rewritten to wrap the whole span in one `InlineFormula` instead of recursing on the inside):
+A `<code>[Symbol]()</code>` reference in a Usage signature carries a paclet link on the head (regression: the link silently disappeared when the `<code>` rule was rewritten to wrap the whole span in one `InlineFormula` instead of recursing on the inside). Since issue #20 the head wraps in the typed `PackageLink` / `RefLink` `TemplateBox` (not a bare `ButtonBox`) so the doc center and `CloudPublish` resolve it:
 
 ```wl
 VerificationTest[
     ! FreeQ[
         MarkdownToNotebook["---\nTemplate: Symbol\nName: Range\nContext: System`\nPaclet: System\nURI: System/ref/Range\n---\n\n## Usage\n\n<code>[Range]()[$n$]</code> gives a list."],
-        ButtonBox["Range", BaseStyle -> "Link", ___]
+        TemplateBox[{Cell[TextData["Range"]], _String, ___}, "PackageLink" | "RefLink", ___]
     ],
     True,
     TestID -> "<code>[Symbol]()…</code> in Usage carries a paclet link on the head"
