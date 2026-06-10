@@ -108,6 +108,12 @@ walkerMath["\[Rule]"] := "\\to "
 walkerMath["\[RightArrow]"] := "\\to "
 walkerMath[s_String /; s =!= "" && StringMatchQ[s, Whitespace]] := "\\, "
 walkerMath[s_String] := StringReplace[normStr[s], Normal @ $mathTeX]
+(* a multi-letter italic identifier in math (StyleBox[s, "TI"]) needs
+   \mathit{} or TeX would render it as a product of single letters
+   (output -> o u t p u t, issue #14). Single letters / Greek fall
+   through to the generic rule below. *)
+walkerMath[StyleBox[s_String, "TI", ___]] /; StringMatchQ[s, RegularExpression["[a-zA-Z]{2,}"]] :=
+    "\\mathit{" <> s <> "}"
 walkerMath[StyleBox[s_, ___]] := walkerMath[s]
 walkerMath[FractionBox[a_, b_]] := walkerMath[a] <> "/" <> walkerMath[b]
 walkerMath[SubscriptBox[a_, b_]] := walkerMath[a] <> "_{" <> walkerMath[b] <> "}"
