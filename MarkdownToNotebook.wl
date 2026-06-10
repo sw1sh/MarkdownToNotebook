@@ -938,8 +938,10 @@ annotateOutputs[blocks_List, hashes_List, outputs_] := Block[{i = 0, walk},
    doc supplies whatever subset is meaningful, and exampleNotebookSlot renders only
    the present sections in this order. *)
 $exampleOrder = {
-    "basic examples", "scope", "scope & additional elements",
-    "generalizations & extensions", "options", "applications",
+    (* sectionKey normalises " & " -> " and ", so the lookup keys must
+       match the normalised form (issue #12; dual of #8). *)
+    "basic examples", "scope", "scope and additional elements",
+    "generalizations and extensions", "options", "applications",
     "visualizations", "analysis",
     "properties and relations", "possible issues", "neat examples",
     "requirements"
@@ -948,8 +950,8 @@ $exampleOrder = {
 $exampleTitle = <|
     "basic examples" -> "Basic Examples",
     "scope" -> "Scope",
-    "scope & additional elements" -> "Scope & Additional Elements",
-    "generalizations & extensions" -> "Generalizations & Extensions",
+    "scope and additional elements" -> "Scope & Additional Elements",
+    "generalizations and extensions" -> "Generalizations & Extensions",
     "options" -> "Options",
     "applications" -> "Applications",
     "visualizations" -> "Visualizations",
@@ -2533,7 +2535,7 @@ setDocMetadata[Notebook[cells_, o : OptionsPattern[]], meta_, type_String] := Bl
    which generate fresh Subsection cells per $exampleOrder entry.) *)
 $extendedTitles = <|
     "scope" -> "Scope",
-    "generalizations & extensions" -> "Generalizations & Extensions",
+    "generalizations and extensions" -> "Generalizations & Extensions",
     "options" -> "Options",
     "applications" -> "Applications",
     "properties and relations" -> "Properties & Relations",
