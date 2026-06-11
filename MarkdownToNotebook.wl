@@ -1862,16 +1862,20 @@ fillDocList[nb_, style_String, items_List] := Block[{vals = DeleteCases[items, "
     ]
 ]
 
-(* the flattened package-name URI segment the DocumentationTools link templates
-   use (issue #20): Context "Wolfram`PureMath`" -> "WolframPureMath";
-   Paclet "Wolfram/PureMath" -> "WolframPureMath".  Falls back to the Paclet
-   value as-is when neither has letters (so a bare publisher-less name still
-   round-trips). *)
-flatPackageName[paclet_String, context_String] := With[
-    {fromCtx = StringDelete[context, "`"], fromPac = StringDelete[paclet, "/"]},
-    Which[fromCtx =!= "", fromCtx, fromPac =!= "", fromPac, True, paclet]
+(* the paclet-name URI segment the DocumentationTools link templates use:
+   paclet:Publisher/Name/ref/Sym - slash preserved (issue #23). The local
+   doc-center resolver keys on the paclet Name verbatim (when no LinkBase
+   is set), so a flattened "PublisherName" form matches nothing and inferred
+   links are dead in-notebook (CloudPublish's web rewrite drops the segment
+   either way, which is why the older flattening looked fine on the deployed
+   page). Falls back to the Context with backtick segments rewritten as
+   slashes when no Paclet frontmatter is set. *)
+packagePath[paclet_String, context_String] := Which[
+    paclet =!= "", paclet,
+    context =!= "", StringReplace[StringTrim[context, "`"], "`" -> "/"],
+    True, ""
 ]
-flatPackageName[paclet_String] := flatPackageName[paclet, $docContext]
+packagePath[paclet_String] := packagePath[paclet, $docContext]
 
 (* the DocumentationTools-shaped typed link boxes (issue #20).  PackageLink for a
    paclet symbol (3-arg, "<Flat> Package Symbol" tag), RefLink for a System
@@ -1893,24 +1897,22 @@ refLinkPlainBox[label_, url_String, baseSty_:Automatic] := TemplateBox[
 
 (* dispatch a "paclet:..." link target to the corresponding typed TemplateBox
    (issue #20).  Mirrors DocumentationBuild's ConvertButtonBox:
-   paclet:<Pkg>/ref/<Sym> -> PackageLink (with the package segments flattened
-   into one identifier, the form CloudPublish keys off);
-   paclet:ref/<Sym> -> RefLink; anything else under paclet: -> RefLinkPlain. *)
-pacletLinkBox[label_, url_String] := Block[{rest, parts, kind, name, flat, flatURL},
+   paclet:<Pkg>/ref/<Sym> -> PackageLink (Pkg is the paclet Name with the
+   slash preserved, e.g. Publisher/Name - see #23, packagePath);
+   paclet:ref/<Sym> -> RefLink; anything else under paclet: -> RefLinkPlain.
+   The URL is passed through verbatim - never reassembled with StringJoin -
+   so a Publisher/Name paclet keeps its slash in the linkbase segment. *)
+pacletLinkBox[label_, url_String] := Block[{rest, parts, pkg},
     rest = StringDelete[url, StartOfString ~~ "paclet:"];
     parts = StringSplit[rest, "/"];
     Which[
         Length[parts] >= 3 && parts[[-2]] === "ref",
-            kind = parts[[-2]]; name = parts[[-1]];
-            flat = StringJoin[parts[[;; -3]]];
-            flatURL = "paclet:" <> flat <> "/" <> kind <> "/" <> name;
-            packageLinkBox[label, flatURL, flat],
+            pkg = StringRiffle[parts[[;; -3]], "/"];
+            packageLinkBox[label, url, pkg],
         Length[parts] === 2 && parts[[1]] === "ref",
             refLinkBox[label, url],
         Length[parts] >= 3 && MemberQ[{"guide", "tutorial"}, parts[[-2]]],
-            kind = parts[[-2]]; name = parts[[-1]];
-            flat = StringJoin[parts[[;; -3]]];
-            refLinkPlainBox[label, "paclet:" <> flat <> "/" <> kind <> "/" <> name],
+            refLinkPlainBox[label, url],
         True, refLinkPlainBox[label, url]
     ]
 ]
@@ -1924,15 +1926,15 @@ docLinkCell[name_String, uri_String] :=
    StandardRed, LightDarkSwitched) points at its system ref page; a guide is
    paclet-qualified for the documented paclet (the typed-link templates need
    the qualified path; a bare paclet:guide/Name is the System form).  The URI
-   uses the flattened package name (issue #20). *)
-linkURI[name_String, paclet_String, kind_String] := Block[{flat = flatPackageName[paclet, $docContext]},
+   carries the paclet name verbatim, slash preserved (issue #23). *)
+linkURI[name_String, paclet_String, kind_String] := Block[{pkg = packagePath[paclet, $docContext]},
     Which[
         kind === "ref" && symbolInContextQ[name, "System`"] && ! symbolInContextQ[name, $docContext],
             "ref/" <> name,
-        kind === "guide" && symbolInContextQ[name, "System`"] && ! symbolInContextQ[name, $docContext] && flat === "",
+        kind === "guide" && symbolInContextQ[name, "System`"] && ! symbolInContextQ[name, $docContext] && pkg === "",
             "guide/" <> name,
-        flat =!= "",
-            flat <> "/" <> kind <> "/" <> name,
+        pkg =!= "",
+            pkg <> "/" <> kind <> "/" <> name,
         True,
             kind <> "/" <> name
     ]
@@ -2319,8 +2321,8 @@ linkInline[text_String, url_String] := Which[
 (* the ref-page URI a bare symbol name resolves to: a name in the documented
    paclet's context links to its paclet ref page, a System symbol to its system
    ref page; anything else does not resolve. *)
-inferURL[name_String] := With[{flat = flatPackageName[$docPaclet, $docContext]}, Which[
-    symbolInContextQ[name, $docContext] && flat =!= "", "paclet:" <> flat <> "/ref/" <> name, (* issue #20 *)
+inferURL[name_String] := With[{pkg = packagePath[$docPaclet, $docContext]}, Which[
+    symbolInContextQ[name, $docContext] && pkg =!= "", "paclet:" <> pkg <> "/ref/" <> name, (* issue #23 *)
     symbolInContextQ[name, $docContext], "paclet:ref/" <> name,
     symbolInContextQ[name, "System`"], "paclet:ref/" <> name,
     True, None
@@ -2751,9 +2753,9 @@ symbolNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"]
 (* the palette's "Inline Listing": a function-name chip linking to its ref page,
    the same typed link the Documentation Tools button produces (issue #20). *)
 guideFnChip[name_String, paclet_String] := With[
-    {flat = flatPackageName[paclet, $docContext]},
+    {pkg = packagePath[paclet, $docContext]},
     Cell[
-        BoxData[pacletLinkBox[name, "paclet:" <> If[flat === "", paclet, flat] <> "/ref/" <> name]],
+        BoxData[pacletLinkBox[name, "paclet:" <> If[pkg === "", paclet, pkg] <> "/ref/" <> name]],
         "InlineGuideFunction", TaggingRules -> {"PageType" -> "Function"}
     ]
 ]
