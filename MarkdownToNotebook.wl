@@ -2182,7 +2182,7 @@ underscoreEm[s_String] := If[! StringContainsQ[s, "_"], {s},
 inlineImage[alt_String, src_String] := Block[{img = Quiet @ Import[src]},
     If[ MatchQ[img, _Image | _Graphics | _Legended | _Graphics3D],
         Cell[BoxData @ ToBoxes[img], "InlineFormula"],
-        linkButton[If[StringTrim[alt] === "", src, alt], src]
+        textDataLinkBox @ linkButton[If[StringTrim[alt] === "", src, alt], src]
     ]
 ]
 
@@ -2285,6 +2285,14 @@ linkButton[text_, url_String] := If[
     ButtonBox[text, BaseStyle -> "Hyperlink", ButtonData -> {URL[url], None}]
 ]
 
+(* a linkButton result safe to splice into prose TextData: a bare TemplateBox
+   (paclet link) is rejected by Export[..., "NB"] (issue #22, same failure
+   class as the RelatedGuides / MoreAbout slot fixes), so wrap it in a
+   BoxData InlineFormula cell when it lands in TextData. ButtonBox results
+   (hyperlinks) are already TextData-safe and pass through unchanged. *)
+textDataLinkBox[b_TemplateBox] := Cell[BoxData[b], "InlineFormula"]
+textDataLinkBox[other_] := other
+
 (* link text supports inline emphasis per CommonMark - "[*Title*](u)" should
    render as a link whose visible label is italic, not as a link displaying
    literal asterisks. Strip a single outer "*"/"**"/"***" wrapper and apply
@@ -2332,7 +2340,7 @@ linkInline[text_String, url_String] := Which[
        ButtonBox so the displayed text doesn't keep the literal backslashes.
        linkButtonStyled additionally honours a single layer of *...* / **...**
        emphasis around the label. *)
-    True, linkButtonStyled[unescapeMarkdownPunctuation[text], url]
+    True, textDataLinkBox @ linkButtonStyled[unescapeMarkdownPunctuation[text], url]
 ]
 
 (* the ref-page URI a bare symbol name resolves to: a name in the documented
