@@ -1591,6 +1591,20 @@ heroSlot[opts_, sections_] := Block[{cells = sectionCells[sections, "hero image"
     If[ cells === {}, Return[slotDefault[opts]] ];
     out = First[cells]["OutputBoxes"];
     code = First[cells]["Code"];
+    (* Self-healing fallback (issue #24): if the example-evaluation pass did
+       not surface an output for the hero cell (whatever the capture gap in
+       the hosting environment), evaluate the code directly here so a
+       scripted/headless build never silently degrades the landing page to
+       the template placeholder. Only when evaluation was requested -
+       evalExamples is the entry Block's dynamic binding, False on
+       "Evaluate" -> False builds, where the placeholder IS the right
+       result. *)
+    If[ (MissingQ[out] || out === Null) && TrueQ[evalExamples] && StringQ[code] && StringTrim[code] =!= "",
+        out = Replace[
+            Quiet @ Check[ToExpression[code], $Failed],
+            {$Failed | _Missing | Null -> Missing[], r_ :> outputBoxes[r, First[cells]["Options"]]}
+        ]
+    ];
     If[ MissingQ[out] || out === Null, Return[slotDefault[opts]] ];
     {Cell[CellGroupData[{
         Cell[BoxData[inputBoxes[code]], "Input"],
