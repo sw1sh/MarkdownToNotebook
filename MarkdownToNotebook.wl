@@ -1958,9 +1958,26 @@ fillDocCells[nb_, style_String, contents_List] := Block[{vals = contents, first 
     ]
 ]
 
+(* DocumentationBuild's symbol-page Related Guides harvester requires a plain
+   Link ButtonBox in each MoreAbout cell (its Make step does
+   First @ Cases[cell, _ButtonBox, Infinity, 1] and dies on First[{}] when the
+   cell holds a typed TemplateBox instead); the build retypes the link itself
+   in the built page, so the authoring notebook carries the palette's
+   ButtonBox form there.  The other link-row styles (SeeAlso,
+   TutorialMoreAbout, RelatedTutorials) pass typed boxes through fine. *)
+guideButtonCell[name_String, paclet_String, kind_String] := Cell[BoxData[
+    ButtonBox[name, BaseStyle -> "Link", ButtonData -> "paclet:" <> linkURI[name, paclet, kind]]
+], "InlineFormula"]
+
 linkRowCell[names_List, style_String, paclet_String, kind_String] := Cell[
     TextData @ Riffle[
-        Map[docLinkCell[#, linkURI[#, paclet, kind]] &, names],
+        Map[
+            If[ style === "MoreAbout",
+                guideButtonCell[#, paclet, kind],
+                docLinkCell[#, linkURI[#, paclet, kind]]
+            ] &,
+            names
+        ],
         " \[FilledVerySmallSquare] "
     ],
     style
