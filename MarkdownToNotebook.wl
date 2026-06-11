@@ -2772,9 +2772,23 @@ guideFunctionItem[item_String, paclet_String] := Block[{m = StringCases[item,
     ]
 ]
 
-guideFunctionCells[sections_, paclet_String] := Block[{items},
-    items = Catenate @ Cases[Lookup[sections, "functions", {}], b_ /; b["Type"] === "List" :> b["Items"]];
-    If[ items === {} || paclet === "", {}, Map[guideFunctionItem[#, paclet] &, items] ]
+(* walk the "## Functions" section in order so a Level-3 "###" heading becomes a
+   GuideFunctionsSubsection divider above the function-link cells in its group
+   instead of being dropped (issue #21). A bare Functions section with no
+   "###" groups still produces one flat run of GuideText cells, same as before. *)
+guideFunctionCells[sections_, paclet_String] := Block[{out = {}, blocks},
+    blocks = Lookup[sections, "functions", {}];
+    If[ paclet === "", Return[{}] ];
+    Do[
+        Which[
+            b["Type"] === "Heading" && b["Level"] === 3,
+                AppendTo[out, Cell[b["Text"], "GuideFunctionsSubsection"]],
+            b["Type"] === "List",
+                out = Join[out, Map[guideFunctionItem[#, paclet] &, b["Items"]]]
+        ],
+        {b, blocks}
+    ];
+    out
 ]
 
 guideNotebook[data_] := Block[{meta = data["meta"], sections = data["sections"], nb, title, abstract, fnCells},
