@@ -2827,14 +2827,28 @@ guideFnChip[name_String, paclet_String] := With[
 
 (* a "## Functions" list item "`Sym` description" -> the docked "1-Line Function"
    template: a GuideText cell of TextData[{<chip>, " \[LongDash] ", <description>}],
-   the chip linked to the symbol's ref page and the description rendered inline. *)
+   the chip linked to the symbol's ref page and the description rendered inline.
+   The \[LongDash] separator is canonical and always inserted, so an authored
+   dash after the symbol ("- `Sym` \[Dash] description") is stripped first -
+   both authored forms render identically instead of doubling the dash. A
+   plain hyphen is only treated as the separator when followed by whitespace,
+   so a description starting with a hyphenated token survives. *)
+stripLeadingDash[s0_String] := Block[{s = StringTrim[s0]},
+    Which[
+        StringStartsQ[s, "\[LongDash]" | "\[Dash]" | "\[HorizontalLine]"], StringTrim @ StringDrop[s, 1],
+        StringStartsQ[s, "--" ~~ WhitespaceCharacter], StringTrim @ StringDrop[s, 2],
+        StringStartsQ[s, "-" ~~ WhitespaceCharacter], StringTrim @ StringDrop[s, 1],
+        True, s
+    ]
+]
+
 guideFunctionItem[item_String, paclet_String] := Block[{m = StringCases[item,
         StartOfString ~~ WhitespaceCharacter ... ~~ "`" ~~ s : Shortest[__] ~~ "`" ~~ r___ :> {s, r}, 1]},
     If[ m === {},
         Cell[TextData @ inlineTextData[item], "GuideText"],
         Cell[TextData @ Join[
             {guideFnChip[First @ First @ m, paclet], " \[LongDash] "},
-            inlineTextData[StringTrim[Last @ First @ m]]
+            inlineTextData[stripLeadingDash[Last @ First @ m]]
         ], "GuideText"]
     ]
 ]
