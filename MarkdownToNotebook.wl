@@ -17,12 +17,31 @@
 
 Needs["GeneralUtilities`"]
 
-If[ PacletFind["Wolfram/Parser"] === {},
-    If[ DirectoryQ["examples/WolframParser"],
-        PacletDirectoryLoad["examples/WolframParser"],
-        If[ FailureQ[PacletInstall["Wolfram/Parser"]],
-            PacletInstall[ResourceObject["https://wolfr.am/1ECIxdqhB"]]
-        ]
+(* The LaTeX math pipeline wants Wolfram/Parser >= $parserVersion - its
+   LaTeXMathParse handles \frac / \mathbb / scripts / sized delimiters that
+   the ImportString[..., "TeX"] fallback (wolframParserTeX) loses.
+
+   Prefer the vendored submodule, resolved against THIS file's own location
+   so it is found from any working directory - the old DirectoryQ check was
+   cwd-relative and silently degraded to ImportString when MTN ran from
+   elsewhere (issue #25). PacletDirectoryLoad makes the paclet manager serve
+   the highest version, so a stale installed copy can't shadow the vendored
+   one. When the .wl was fetched standalone (no submodule on disk), install
+   the published paclet - but skip the install when an adequate version is
+   already present. *)
+$parserVersion = "0.2.1"
+pacletInstalledQ[paclet_String, version_String] := AnyTrue[
+    Through[PacletFind[paclet]["Version"]],
+    ResourceFunction["VersionOrder"][#, version] <= 0 &
+]
+With[{vendored = FileNameJoin[{
+        Replace[DirectoryName[$InputFileName], "" :> Directory[]],
+        "examples", "WolframParser"}]},
+    Which[
+        DirectoryQ[vendored], PacletDirectoryLoad[vendored],
+        pacletInstalledQ["Wolfram/Parser", $parserVersion], Null,
+        ! FailureQ[PacletInstall["Wolfram/Parser"]], Null,
+        True, PacletInstall[ResourceObject["https://wolfr.am/1ECIxdqhB"]]
     ]
 ]
 (* Best-effort: if no parser is reachable, MTN still loads and the math path
@@ -2283,8 +2302,20 @@ wolframParserTeX[math_String] :=
         ]
     ]
 
+(* last-resort TeX import (the WolframParser path having failed or being
+   absent). ImportString[..., "TeX"] understands no spacing / sizing
+   typography, so strip the tokens that would otherwise leak as literal
+   text before importing (issue #25): \! negative thin space, the empty
+   \left. / \right. delimiters, and the sized-delimiter prefixes
+   \big / \Big / \bigg / \Bigg (+ l/r/m variants) - with a word-boundary
+   guard so \bigcup / \bigcap / \Bigl-less commands survive. *)
+texImportStrip[math_String] := StringReplace[math, {
+    "\\!" -> "",
+    "\\left." -> "", "\\right." -> "",
+    RegularExpression["\\\\[Bb]igg?[lrm]?(?![a-zA-Z])"] -> ""
+}]
 texBoxesViaImport[math_String] :=
-    Block[{nb = Quiet @ ImportString["$" <> math <> "$", "TeX"]},
+    Block[{nb = Quiet @ ImportString["$" <> texImportStrip[math] <> "$", "TeX"]},
         If[ MatchQ[nb, _Notebook],
             FirstCase[nb, Cell[BoxData[b_], ___] :> b, $Failed, Infinity],
             $Failed

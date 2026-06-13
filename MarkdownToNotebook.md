@@ -624,3 +624,51 @@ VerificationTest[
 ]
 ```
 
+Inline math with a bare sign as a script argument (`$\sigma_-$`) attaches the sign as a subscript - the same `SubscriptBox` the braced `\sigma_{-}` form produces - instead of leaking a loose `_` `-` (Wolfram/Parser issue #26):
+
+```wl
+VerificationTest[
+    ! FreeQ[
+        MarkdownToNotebook["A $\\sigma_-$ operator.", "Evaluate" -> False],
+        SubscriptBox[_, "-"]
+    ],
+    True,
+    TestID -> "inline math: bare-sign subscript $\\sigma_-$ attaches as SubscriptBox"
+]
+```
+
+A script on a closing delimiter (`$|0\rangle^{\otimes 10}$`) attaches to the `\rangle` glyph where TeX puts it, instead of leaking a literal `^` (Wolfram/Parser issue #26):
+
+```wl
+VerificationTest[
+    ! FreeQ[
+        MarkdownToNotebook["A $|0\\rangle^{\\otimes 10}$ ket.", "Evaluate" -> False],
+        SuperscriptBox[StyleBox["\[RightAngleBracket]", ___], _]
+    ],
+    True,
+    TestID -> "inline math: power on a closing \\rangle becomes a SuperscriptBox"
+]
+```
+
+A sized delimiter (`$\big(x\big)$`) scales with the surrounding text via `FontSize -> r Inherited`, never the absolute `Magnification` (which renders smaller than the body text under any viewer zoom; Wolfram/Parser issue #27):
+
+```wl
+VerificationTest[
+    With[{nb = MarkdownToNotebook["A $\\big(x\\big)$ group.", "Evaluate" -> False]},
+        FreeQ[nb, Magnification -> _] && ! FreeQ[nb, StyleBox["(", FontSize -> _]]
+    ],
+    True,
+    TestID -> "inline math: \\big( sizes with FontSize -> Inherited, not Magnification"
+]
+```
+
+The last-resort `ImportString[..., "TeX"]` path (used only when the Wolfram/Parser paclet is unreachable) strips the spacing / sizing tokens that import would otherwise leak as literal text - `\!`, the empty `\left.`/`\right.`, and the `\big`/`\Big` sized-delimiter prefixes - while leaving big operators like `\bigcup` intact (issue #25):
+
+```wl
+VerificationTest[
+    {texImportStrip["a\\!b"], texImportStrip["\\big(x\\big)"], texImportStrip["\\bigcup A"]},
+    {"ab", "(x)", "\\bigcup A"},
+    TestID -> "texImportStrip drops \\!/\\big but keeps \\bigcup"
+]
+```
+
