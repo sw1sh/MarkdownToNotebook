@@ -543,7 +543,7 @@ VerificationTest[
             Missing[],
             Infinity
         ],
-        Cell[TextData[{"Some ", Cell[BoxData["1"], "InlineFormula", FontWeight -> "Bold"], " prose."}], "Text"]
+        Cell[TextData[{"Some ", Cell[BoxData["1" | StyleBox["1", ___]], "InlineFormula", FontWeight -> "Bold"], " prose."}], "Text"]
     ],
     True,
     TestID -> "bold containing math wraps the InlineFormula with FontWeight -> Bold"
