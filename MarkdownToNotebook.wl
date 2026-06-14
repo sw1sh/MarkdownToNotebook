@@ -2093,6 +2093,10 @@ mdToTemplateSubs[s_String] := StringReplace[s, {
 }]
 
 templateBox[code_String] := Block[{boxes, prepped = mdToTemplateSubs[StringTrim[code]]},
+    (* a path / URL / dotted filename is not a signature - keep it verbatim
+       instead of letting ParseTextTemplate tokenise its / . ~ as operators
+       (same guard as inputBoxes; see looksLikeLiteralPathQ). *)
+    If[looksLikeLiteralPathQ[prepped], Return[prepped]];
     Needs["DocumentationTools`"];
     boxes = Quiet @ UsingFrontEnd @ DocumentationTools`Private`ParseTextTemplate[prepped, $docName];
     (* fall back to a plain parse if the front-end template parse is unavailable *)
