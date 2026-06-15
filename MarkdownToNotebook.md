@@ -536,14 +536,12 @@ Bold / italic / strike runs containing other inline markup ("**$x$**", "*$n$*", 
 
 ```wl
 VerificationTest[
-    MatchQ[
-        FirstCase[
-            MarkdownToNotebook["Some **$1$** prose.", "Evaluate" -> False],
-            Cell[_, "Text", ___],
-            Missing[],
-            Infinity
-        ],
-        Cell[TextData[{"Some ", Cell[BoxData["1" | StyleBox["1", ___]], "InlineFormula", FontWeight -> "Bold"], " prose."}], "Text"]
+    (* the inline-math cell carries FontWeight -> Bold (alongside the
+       FontSize the math style adds); matched loosely so option order /
+       the math-font wrapper don't matter *)
+    ! FreeQ[
+        MarkdownToNotebook["Some **$1$** prose.", "Evaluate" -> False],
+        Cell[BoxData["1" | StyleBox["1", ___]], "InlineFormula", o___] /; ! FreeQ[{o}, FontWeight -> "Bold"]
     ],
     True,
     TestID -> "bold containing math wraps the InlineFormula with FontWeight -> Bold"
@@ -637,16 +635,16 @@ VerificationTest[
 ]
 ```
 
-A script on a closing delimiter (`$|0\rangle^{\otimes 10}$`) attaches to the `\rangle` glyph where TeX puts it, instead of leaking a literal `^` (Wolfram/Parser issue #26):
+A ket with a power (`$|0\rangle^{\otimes 10}$`) maps to the system `Ket` template (full-height, stretchy delimiters) with the power lifted onto it, instead of leaking a literal `^` or short detached bars (Wolfram/Parser issues #26 + #28):
 
 ```wl
 VerificationTest[
     ! FreeQ[
         MarkdownToNotebook["A $|0\\rangle^{\\otimes 10}$ ket.", "Evaluate" -> False],
-        SuperscriptBox[StyleBox["\[RightAngleBracket]", ___], _]
+        SuperscriptBox[TemplateBox[_, "Ket", ___], _]
     ],
     True,
-    TestID -> "inline math: power on a closing \\rangle becomes a SuperscriptBox"
+    TestID -> "inline math: ket power |0>^{...} becomes a Ket-template superscript"
 ]
 ```
 

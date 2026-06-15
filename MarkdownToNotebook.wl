@@ -29,7 +29,7 @@ Needs["GeneralUtilities`"]
    one. When the .wl was fetched standalone (no submodule on disk), install
    the published paclet - but skip the install when an adequate version is
    already present. *)
-$parserVersion = "0.2.1"
+$parserVersion = "0.2.2"
 pacletInstalledQ[paclet_String, version_String] := AnyTrue[
     Through[PacletFind[paclet]["Version"]],
     ResourceFunction["VersionOrder"][#, version] <= 0 &
@@ -2383,10 +2383,18 @@ texBoxesViaImport[math_String] :=
         ]
     ]
 
+(* InlineFormula in Default.nb resolves to 1.05*Inherited, which lands inline
+   math about 1.1x the surrounding Text height (issue #29). Pin a relative
+   factor that cancels the inline magnification while tracking whatever the
+   host Text style resolves to (so it is not tied to an absolute point size);
+   it scales the cell uniformly, keeping sub/superscripts and templates in
+   proportion. Display math (mathBlockCell -> DisplayFormula) keeps its own
+   prominent size. *)
+$inlineMathFontSize = 0.9 Inherited
 mathInline[math_String] := Block[{boxes = texBoxes[math]},
     If[ boxes === $Failed,
-        Cell[BoxData[FormBox[inputBoxes[math], TraditionalForm]], "InlineFormula"],
-        Cell[BoxData[boxes], "InlineFormula"]
+        Cell[BoxData[FormBox[inputBoxes[math], TraditionalForm]], "InlineFormula", FontSize -> $inlineMathFontSize],
+        Cell[BoxData[boxes], "InlineFormula", FontSize -> $inlineMathFontSize]
     ]
 ]
 
